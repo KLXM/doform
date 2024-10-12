@@ -109,69 +109,77 @@ class FormProcessor
         return false;
     }
 
+    public function getFormData(): array
+    {
+        return $this->formData;
+    }
 
+    public function getFileData(): array
+    {
+        return $this->fileData;
+    }
 
-private function handleFormData(): void
-{
-    foreach ($this->formFields as $field => $info) {
-        $cleanField = rtrim($field, '[]');
-        $fieldType = $info['type'];
+    private function handleFormData(): void
+    {
+        foreach ($this->formFields as $field => $info) {
+            $cleanField = rtrim($field, '[]');
+            $fieldType = $info['type'];
 
-        switch ($fieldType) {
-            case 'multiselect':
-                $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
-                if (!empty($this->formData[$cleanField])) {
-                    $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
-                } else {
-                    $this->formData[$cleanField] = null;
-                }
-                break;
+            switch ($fieldType) {
+                case 'multiselect':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                    if (!empty($this->formData[$cleanField])) {
+                        $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
+                    } else {
+                        $this->formData[$cleanField] = null;
+                    }
+                    break;
 
-            case 'select':
-            case 'radio':
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                break;
+                case 'select':
+                case 'radio':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    break;
 
-            case 'checkbox':
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
-                break;
+                case 'checkbox':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
+                    break;
 
-            case 'date':
-                // Datum formatieren mit rex_formatter::intlDate
-                $dateValue = rex_post($cleanField, 'string', null);
-                if (!empty($dateValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
-                }
-                break;
+                case 'date':
+                    // Datum formatieren mit rex_formatter::intlDate
+                    $dateValue = rex_post($cleanField, 'string', null);
+                    if (!empty($dateValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
+                    }
+                    break;
 
-            case 'time':
-                // Zeit formatieren mit rex_formatter::intlTime
-                $timeValue = rex_post($cleanField, 'string', null);
-                if (!empty($timeValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
-                }
-                break;
+                case 'time':
+                    // Zeit formatieren mit rex_formatter::intlTime
+                    $timeValue = rex_post($cleanField, 'string', null);
+                    if (!empty($timeValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
+                    }
+                    break;
 
-            case 'datetime-local':
-                // Datum und Zeit formatieren mit rex_formatter::intlDateTime
-                $dateTimeValue = rex_post($cleanField, 'string', null);
-                if (!empty($dateTimeValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
-                }
-                break;
+                case 'datetime-local':
+                    // Datum und Zeit formatieren mit rex_formatter::intlDateTime
+                    $dateTimeValue = rex_post($cleanField, 'string', null);
+                    if (!empty($dateTimeValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
+                    }
+                    break;
 
-            default:
-                // Standardverarbeitung für Textfelder, E-Mails, etc.
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                break;
-        }
+                default:
+                    // Standardverarbeitung für Textfelder, E-Mails, etc.
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    break;
+            }
 
-        // Validierung für Pflichtfelder
-        if ($info['required'] && empty($this->formData[$cleanField])) {
-            $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+            // Validierung für Pflichtfelder
+            if ($info['required'] && empty($this->formData[$cleanField])) {
+                $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+            }
         }
     }
-}
 
 
     private function handleFileUploads(): void
