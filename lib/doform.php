@@ -2,10 +2,11 @@
 
 namespace klxm\doform;
 
+use IntlDateFormatter;
 use rex_formatter;
 use rex_mailer;
 use rex_path;
-use IntlDateFormatter;
+use rex_yform_manager_dataset;
 
 class FormProcessor
 {
@@ -241,8 +242,6 @@ class FormProcessor
 
         return null;
     }
-
-    use rex_yform_manager_dataset;
 
     public function saveToYform(string $tableName, array $fieldMapping): bool
     {
