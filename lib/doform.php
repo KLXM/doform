@@ -15,6 +15,7 @@ class FormProcessor
     private array $formData = [];
     private array $fileData = [];
     private array $errors = [];
+    private array $fieldErrors = [];
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -97,9 +98,19 @@ class FormProcessor
         }
     }
 
-    public function displayForm(): void
+    public function displayForm(bool $showFieldErrors = false): void
     {
-        echo $this->formHtml;
+        echo '<form>';
+        foreach ($this->formFields as $field => $info) {
+            echo '<label for="' . htmlspecialchars($field) . '">' . htmlspecialchars($info['label']) . '</label>';
+            echo '<input type="' . htmlspecialchars($info['type']) . '" name="' . htmlspecialchars($field) . '" id="' . htmlspecialchars($field) . '" value="' . htmlspecialchars($this->formData[$field] ?? '') . '">';
+
+            // Optional: Fehlermeldungen unter dem Feld anzeigen, falls gewünscht
+            if ($showFieldErrors && $error = $this->getFieldError($field)) {
+                echo '<div class="field-error">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+        echo '</form>';
     }
 
     public function processForm(): ?bool
@@ -179,8 +190,11 @@ class FormProcessor
                     break;
             }
 
+            // Validierung für Pflichtfelder
             if ($info['required'] && empty($this->formData[$cleanField])) {
-                $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+                $errorMessage = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+                $this->fieldErrors[$cleanField] = $errorMessage; // Fehler für das Feld speichern
+                $this->errors[] = $errorMessage;  // Globaler Fehler
             }
         }
     }
@@ -296,6 +310,28 @@ class FormProcessor
         return true;
     }
 
+    public function saveToYform(string $tableName, array $fieldMapping): bool
+    {
+        try {
+            $dataSet = rex_yform_manager_dataset::create($tableName);
+
+            foreach ($this->formData as $field => $value) {
+                if (isset($fieldMapping[$field])) {
+                    $dbField = $fieldMapping[$field];
+                    if ($dataSet->hasField($dbField)) {
+                        $dataSet->setValue($dbField, $value);
+                    }
+                }
+            }
+
+            $dataSet->save();
+            return true;
+        } catch (Exception $e) {
+            $this->errors[] = "Fehler beim Speichern in die YForm-Datenbank: " . $e->getMessage();
+            return false;
+        }
+    }
+
     public function displayErrors(): void
     {
         if (!empty($this->errors)) {
@@ -305,6 +341,11 @@ class FormProcessor
             }
             echo "</ul>";
         }
+    }
+
+    public function getFieldError(string $field): ?string
+    {
+        return $this->fieldErrors[$field] ?? null;
     }
 
     public function getFormHtml(): string
