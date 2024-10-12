@@ -141,30 +141,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $processor->displayForm();
 }
 ?>
-
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anmeldung zur doForm!-Party</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; max-width: 600px; margin: 0 auto; }
-        form { display: flex; flex-direction: column; }
-        label { margin-top: 10px; }
-        input, select, textarea { margin-bottom: 15px; padding: 5px; }
-        button { background-color: #4CAF50; color: white; padding: 10px; border: none; cursor: pointer; }
-        button:hover { background-color: #45a049; }
-        .success { background-color: #dff0d8; border: 1px solid #d6e9c6; color: #3c763d; padding: 15px; margin-bottom: 20px; }
-        .error-container { background-color: #f2dede; border: 1px solid #ebccd1; color: #a94442; padding: 15px; margin-bottom: 20px; }
-    </style>
-</head>
-<body>
-    <?php
-    // Hier wird das Formular oder die Erfolgsmeldung angezeigt
-    ?>
-</body>
-</html>
 ```
 
 ## Tipps & Tricks für File Uploads
