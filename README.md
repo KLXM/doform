@@ -11,8 +11,6 @@ Ich bin zurück und ganz neu! 🎉 doForm ist jetzt cooler und flexibler als je 
 - E-Mail-Versand der Formulardaten inklusive Dateianhänge
 - Integrierte Fehlerbehandlung und -anzeige
 - Einfache Anpassung und Erweiterung
-- **Flexible Zuordnung von Formularfeldern zu YForm-Datenbankspalten**
-- **Komma-getrennte Unterstützung für Mehrfach-Empfänger in To, Cc und Bcc**
 
 ## Das Herz von doForm: Der FormProcessor
 
@@ -23,12 +21,6 @@ Der FormProcessor ist das Herzstück von doForm. Er kümmert sich um all die kom
 - **Handhabt Datei-Uploads sicher und effizient**
 - Sendet die gesammelten Daten und Dateien per E-Mail
 - Handhabt Fehler und zeigt sie benutzerfreundlich an
-- **Speichert die Formulardaten direkt in eine YForm-Datenbanktabelle**
-- Unterstützt das Hinzufügen von Empfängern per `To`, `Cc` und `Bcc`, sowohl für einzelne als auch für mehrere E-Mail-Adressen (Komma-getrennt)
-- **Flexibel anpassbar**, um den Bedürfnissen deines REDAXO-Projekts gerecht zu werden
-
-
-Die Ergänzungen heben weitere Kernfunktionen hervor, wie z. B. die Unterstützung für YForm-Datenbanken und die Flexibilität beim E-Mail-Versand.
 
 ## Installation
 
@@ -150,106 +142,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 ?>
 ```
-
-## `FormProcessor` Fehlermeldungen
-
-Die Klasse `FormProcessor` unterstützt zwei Möglichkeiten, um Fehlermeldungen anzuzeigen:
-
-1. **Globale Fehlermeldungen**: Diese werden gesammelt und können an einer zentralen Stelle ausgegeben werden (z. B. am Anfang des Formulars) durch den Aufruf von `displayErrors()`.
-
-2. **Fehlermeldungen unter den Feldern**: Diese können optional direkt unter den jeweiligen Feldern angezeigt werden, wenn die Methode `displayForm(true)` aufgerufen wird. Standardmäßig werden die Fehlermeldungen unter den Feldern nicht angezeigt (`displayForm(false)`).
-
-**Beispiel:**
-```php
-$formProcessor = new FormProcessor($formHtml);
-
-// Verarbeite das Formular und zeige Fehler an
-if ($formProcessor->processForm() === false) {
-    // Globale Fehleranzeige
-    $formProcessor->displayErrors();
-    
-    // Formular ohne Fehlermeldungen unter den Feldern
-    $formProcessor->displayForm(false);
-    
-    // Optional: Formular mit Fehlermeldungen unter den Feldern anzeigen
-    // $formProcessor->displayForm(true);
-}
-```
-
-## Daten nach dem Versand verarbeiten?
-
-Ja klar… z.B. so: 
-
-```php
-if ($formProcessor->processForm()) {
-    $formData = $formProcessor->getFormData();
-    $fileData = $formProcessor->getFileData();
-
-    // Formulardaten weiterverarbeiten
-    foreach ($formData as $field => $value) {
-        echo "Feld: $field, Wert: $value<br>";
-    }
-
-    // Dateidaten weiterverarbeiten
-    foreach ($fileData as $field => $files) {
-        echo "Dateien für $field:<br>";
-        foreach ($files as $filePath) {
-            echo "Hochgeladene Datei: " . basename($filePath) . "<br>";
-        }
-    }
-} else {
-    $formProcessor->displayErrors();
-}
-
-```
-
-## In YForm speichern
-
-Echt jetzt?
-Aber klar doch.
-
-```php
-$fieldMapping = [
-    'name' => 'Surname',
-    'email' => 'Email',
-    'phone' => 'PhoneNumber',
-];
-
-if ($formProcessor->processForm()) {
-    // Dynamisches Mapping beim Speichern in die YForm-Datenbank verwenden
-    if ($formProcessor->saveToYform('rex_your_table_name', $fieldMapping)) {
-        echo "Daten erfolgreich in die YForm-Datenbank geschrieben.";
-    } else {
-        echo "Fehler beim Speichern der Daten.";
-    }
-} else {
-    $formProcessor->displayErrors();
-}
-
-```
-
-## Details für Devs
-
-Hier ist die Übersicht als Tabelle:
-
-| **Methode** | **Beschreibung** | **Rückgabewert** |
-|-------------|------------------|------------------|
-| `__construct(string $formHtml, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)` | Konstruktor, der das Formular-HTML, den Upload-Ordner, erlaubte Dateiendungen und maximale Dateigröße initialisiert und das Formular parst. | Keiner (Konstruktor) |
-| `setEmailFrom(string $email): void` | Setzt die E-Mail-Adresse des Absenders (`From`). | `void` |
-| `setEmailTo(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen des Empfängers (`To`). | `void` |
-| `setEmailCc(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen für den `Cc`-Kopfbereich der E-Mail. | `void` |
-| `setEmailBcc(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen für den `Bcc`-Kopfbereich der E-Mail. | `void` |
-| `setEmailSubject(string $subject): void` | Setzt den Betreff der E-Mail. | `void` |
-| `displayForm(): void` | Zeigt das Formular-HTML an (wenn noch keine POST-Daten gesendet wurden). | `void` |
-| `processForm(): ?bool` | Verarbeitet die übermittelten Formulardaten, validiert sie, lädt Dateien hoch und versendet E-Mails. Gibt `true` bei erfolgreicher Verarbeitung, `false` bei Fehlern oder `null` bei GET-Anfragen zurück. | `true`, `false`, `null` |
-| `getFormData(): array` | Gibt die verarbeiteten und bereinigten Formulardaten zurück. | `array` |
-| `getFileData(): array` | Gibt die hochgeladenen Dateien zurück, falls Dateien übermittelt wurden. | `array` |
-| `saveToYform(string $tableName, array $fieldMapping): bool` | Speichert die verarbeiteten Formulardaten in einer YForm-Datenbanktabelle. Gibt `true` zurück, wenn das Speichern erfolgreich war, oder `false` bei Fehlern. | `true`, `false` |
-| `displayErrors(): void` | Gibt alle während der Formularverarbeitung aufgetretenen Fehler aus. | `void` |
-| `getFormHtml(): string` | Gibt das ursprüngliche HTML des Formulars zurück. | `string` |
-
----
-
 
 ## Tipps & Tricks für File Uploads
 
