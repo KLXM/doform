@@ -27,6 +27,8 @@ class FormProcessor
     private string $emailCc = '';
     private string $emailBcc = '';
 
+    private array $formAttributes = [];
+
     // Für CSRF, Honeypot, und Session-basierte Validierungen
     private string $csrfToken;
     private string $honeypotField = 'honeypot';
@@ -71,98 +73,169 @@ class FormProcessor
         $this->emailSubject = $subject;
     }
 
-  private function parseForm(): void
-{
-    $dom = new \DOMDocument();
-    @$dom->loadHTML($this->formHtml);
-    $form = $dom->getElementsByTagName('form')->item(0);
+    private function parseForm(): void
+    {
+        $dom = new \DOMDocument();
+        @$dom->loadHTML($this->formHtml);
+        $form = $dom->getElementsByTagName('form')->item(0);
 
-    if ($form) {
-        // Alle Form-Attribute außer 'method' speichern
-        foreach ($form->attributes as $attribute) {
-            if ($attribute->name !== 'method') {  // 'method' ignorieren
-                $this->formAttributes[$attribute->name] = $attribute->value;
+        if ($form) {
+            // Alle Form-Attribute außer 'method' speichern
+            foreach ($form->attributes as $attribute) {
+                if ($attribute->name !== 'method') {  // 'method' ignorieren
+                    $this->formAttributes[$attribute->name] = $attribute->value;
+                }
             }
         }
+
+        // Labels erfassen
+        $labels = [];
+        foreach ($form->getElementsByTagName('label') as $label) {
+            $for = $label->getAttribute('for');
+            $labels[$for] = trim($label->nodeValue);
+        }
+
+        // Inputs und andere Formularelemente sammeln
+        foreach ($form->getElementsByTagName('input') as $input) {
+            $name = $input->getAttribute('name');
+            $type = $input->getAttribute('type') ?: 'text';
+            $required = $input->hasAttribute('required');
+            $label = isset($labels[$name]) ? $labels[$name] : $input->getAttribute('placeholder');
+            
+            // Speichern der Attribute für jedes Feld, aber ignorieren des 'id'-Attributs
+            $attributes = [];
+            foreach ($input->attributes as $attr) {
+                if ($attr->name !== 'id') {  // 'id' ignorieren
+                    $attributes[$attr->name] = $attr->value;
+                }
+            }
+
+            // Automatisch eine ID für jedes Feld generieren
+            $generatedId = 'field_' . uniqid();
+
+            $this->formFields[$name] = [
+                'type' => $type, 
+                'required' => $required, 
+                'label' => $label, 
+                'attributes' => $attributes, // Attribute speichern
+                'generatedId' => $generatedId  // Automatisch generierte ID
+            ];
+        }
+
+        // Ähnliches für Select- und Textarea-Felder
+        foreach ($form->getElementsByTagName('select') as $select) {
+            $name = $select->getAttribute('name');
+            $multiple = $select->hasAttribute('multiple');
+            $required = $select->hasAttribute('required');
+            $label = isset($labels[$name]) ? $labels[$name] : null;
+
+            // Speichern der Attribute, aber 'id' ignorieren
+            $attributes = [];
+            foreach ($select->attributes as $attr) {
+                if ($attr->name !== 'id') {  // 'id' ignorieren
+                    $attributes[$attr->name] = $attr->value;
+                }
+            }
+
+            // Automatisch eine ID für jedes Select-Feld generieren
+            $generatedId = 'field_' . uniqid();
+
+            $this->formFields[$name] = [
+                'type' => $multiple ? 'multiselect' : 'select', 
+                'required' => $required, 
+                'label' => $label,
+                'attributes' => $attributes, // Attribute speichern
+                'generatedId' => $generatedId  // Automatisch generierte ID
+            ];
+        }
+
+        foreach ($form->getElementsByTagName('textarea') as $textarea) {
+            $name = $textarea->getAttribute('name');
+            $required = $textarea->hasAttribute('required');
+            $label = isset($labels[$name]) ? $labels[$name] : $textarea->getAttribute('placeholder');
+
+            // Speichern der Attribute, aber 'id' ignorieren
+            $attributes = [];
+            foreach ($textarea->attributes as $attr) {
+                if ($attr->name !== 'id') {  // 'id' ignorieren
+                    $attributes[$attr->name] = $attr->value;
+                }
+            }
+
+            // Automatisch eine ID für jedes Textarea-Feld generieren
+            $generatedId = 'field_' . uniqid();
+
+            $this->formFields[$name] = [
+                'type' => 'textarea', 
+                'required' => $required, 
+                'label' => $label,
+                'attributes' => $attributes, // Attribute speichern
+                'generatedId' => $generatedId  // Automatisch generierte ID
+            ];
+        }
+
+        // CSRF und Honeypot als versteckte Felder hinzufügen
+        $this->formFields['csrf_token'] = ['type' => 'hidden', 'required' => true, 'attributes' => [], 'generatedId' => 'csrf_token'];
+        $this->formFields[$this->honeypotField] = ['type' => 'hidden', 'required' => false, 'attributes' => [], 'generatedId' => $this->honeypotField];
     }
-
-    // Labels erfassen
-    $labels = [];
-    foreach ($form->getElementsByTagName('label') as $label) {
-        $for = $label->getAttribute('for');
-        $labels[$for] = trim($label->nodeValue);
-    }
-
-    // Inputs und andere Formularelemente sammeln
-    foreach ($form->getElementsByTagName('input') as $input) {
-        $name = $input->getAttribute('name');
-        $type = $input->getAttribute('type') ?: 'text';
-        $required = $input->hasAttribute('required');
-        $label = isset($labels[$name]) ? $labels[$name] : $input->getAttribute('placeholder');
-        $this->formFields[$name] = ['type' => $type, 'required' => $required, 'label' => $label];
-    }
-
-    foreach ($form->getElementsByTagName('select') as $select) {
-        $name = $select->getAttribute('name');
-        $multiple = $select->hasAttribute('multiple');
-        $required = $select->hasAttribute('required');
-        $label = isset($labels[$name]) ? $labels[$name] : null;
-        $this->formFields[$name] = ['type' => $multiple ? 'multiselect' : 'select', 'required' => $required, 'label' => $label];
-    }
-
-    foreach ($form->getElementsByTagName('textarea') as $textarea) {
-        $name = $textarea->getAttribute('name');
-        $required = $textarea->hasAttribute('required');
-        $label = isset($labels[$name]) ? $labels[$name] : $textarea->getAttribute('placeholder');
-        $this->formFields[$name] = ['type' => 'textarea', 'required' => $required, 'label' => $label];
-    }
-
-    // CSRF und Honeypot als versteckte Felder hinzufügen
-    $this->formFields['csrf_token'] = ['type' => 'hidden', 'required' => true, 'label' => ''];
-    $this->formFields[$this->honeypotField] = ['type' => 'hidden', 'required' => false, 'label' => ''];
-}
-
 
     public function displayForm(bool $showFieldErrors = false): void
-{
-    // Immer 'post' als method setzen
-    $formMethod = 'post';
+    {
+        // Immer 'post' als method setzen
+        $formMethod = 'post';
 
-    // Öffnendes <form>-Tag mit allen Attributen außer 'method'
-    echo '<form method="' . htmlspecialchars($formMethod) . '"';
+        // Öffnendes <form>-Tag mit allen Attributen außer 'method'
+        echo '<form method="' . htmlspecialchars($formMethod) . '"';
 
-    // Füge alle anderen gespeicherten Form-Attribute hinzu
-    foreach ($this->formAttributes as $attributeName => $attributeValue) {
-        echo ' ' . htmlspecialchars($attributeName) . '="' . htmlspecialchars($attributeValue) . '"';
-    }
-    echo '>';
+        // Füge alle anderen gespeicherten Form-Attribute hinzu
+        foreach ($this->formAttributes as $attributeName => $attributeValue) {
+            echo ' ' . htmlspecialchars($attributeName) . '="' . htmlspecialchars($attributeValue) . '"';
+        }
+        echo '>';
 
-    // Formularfelder ausgeben
-    foreach ($this->formFields as $field => $info) {
-        if ($info['type'] === 'hidden') {
-            // Versteckte Felder für CSRF und Honeypot
-            if ($field === 'csrf_token') {
-                echo '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($this->csrfToken) . '">';
-            } elseif ($field === $this->honeypotField) {
-                echo '<input type="text" name="' . htmlspecialchars($field) . '" style="display:none;">';
+        // Formularfelder ausgeben
+        foreach ($this->formFields as $field => $info) {
+            if ($info['type'] === 'hidden') {
+                // Versteckte Felder für CSRF und Honeypot
+                if ($field === 'csrf_token') {
+                    echo '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($this->csrfToken) . '">';
+                } elseif ($field === $this->honeypotField) {
+                    echo '<input type="text" name="' . htmlspecialchars($field) . '" style="display:none;">';
+                }
+                continue;
             }
-            continue;
-        }
-        
-        // Normale Felder
-        echo '<label for="' . htmlspecialchars($field) . '">' . htmlspecialchars($info['label']) . '</label>';
-        echo '<input type="' . htmlspecialchars($info['type']) . '" name="' . htmlspecialchars($field) . '" id="' . htmlspecialchars($field) . '" value="' . htmlspecialchars($this->formData[$field] ?? '') . '">';
 
-        // Optional: Fehlermeldungen unter dem Feld anzeigen, falls gewünscht
-        if ($showFieldErrors && $error = $this->getFieldError($field)) {
-            echo '<div class="field-error">' . htmlspecialchars($error) . '</div>';
+            // Normale Felder
+            echo '<label for="' . htmlspecialchars($info['generatedId']) . '">' . htmlspecialchars($info['label']) . '</label>';
+
+            // Öffnendes <input>, <select> oder <textarea> mit allen gespeicherten Attributen, aber die ID wird durch die Klasse generiert
+            $attributes = ' id="' . htmlspecialchars($info['generatedId']) . '"';
+            foreach ($info['attributes'] as $attrName => $attrValue) {
+                $attributes .= ' ' . htmlspecialchars($attrName) . '="' . htmlspecialchars($attrValue) . '"';
+            }
+
+            // Unterschiedliche Feldtypen berücksichtigen
+            if ($info['type'] === 'textarea') {
+                echo '<textarea name="' . htmlspecialchars($field) . '"' . $attributes . '>';
+                echo htmlspecialchars($this->formData[$field] ?? '');
+                echo '</textarea>';
+            } elseif ($info['type'] === 'select') {
+                echo '<select name="' . htmlspecialchars($field) . '"' . $attributes . '>';
+                // Optionen hier hinzufügen, falls benötigt
+                echo '</select>';
+            } else {
+                echo '<input type="' . htmlspecialchars($info['type']) . '" name="' . htmlspecialchars($field) . '" value="' . htmlspecialchars($this->formData[$field] ?? '') . '"' . $attributes . '>';
+            }
+
+            // Optional: Fehlermeldungen unter dem Feld anzeigen, falls gewünscht
+            if ($showFieldErrors && $error = $this->getFieldError($field)) {
+                echo '<div class="field-error">' . htmlspecialchars($error) . '</div>';
+            }
         }
+
+        // Schließendes </form>-Tag
+        echo '</form>';
     }
-
-    // Schließendes </form>-Tag
-    echo '</form>';
-}
-
 
     public function processForm(): ?bool
     {
