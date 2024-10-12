@@ -86,7 +86,38 @@ class FormProcessor
 
     public function displayForm(): void
     {
-        echo $this->formHtml;
+        $dom = new \DOMDocument();
+        @$dom->loadHTML($this->formHtml);
+
+        // Vorhandene Daten in die Formularfelder einsetzen
+        foreach ($dom->getElementsByTagName('input') as $input) {
+            $name = $input->getAttribute('name');
+            $cleanField = rtrim($name, '[]');
+            if (isset($this->formData[$cleanField])) {
+                $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField]));
+            }
+        }
+
+        foreach ($dom->getElementsByTagName('textarea') as $textarea) {
+            $name = $textarea->getAttribute('name');
+            if (isset($this->formData[$name])) {
+                $textarea->nodeValue = htmlspecialchars($this->formData[$name]);
+            }
+        }
+
+        foreach ($dom->getElementsByTagName('select') as $select) {
+            $name = $select->getAttribute('name');
+            if (isset($this->formData[$name])) {
+                foreach ($select->getElementsByTagName('option') as $option) {
+                    if ($option->getAttribute('value') === $this->formData[$name]) {
+                        $option->setAttribute('selected', 'selected');
+                    }
+                }
+            }
+        }
+
+        // Geändertes HTML ausgeben
+        echo $dom->saveHTML();
     }
 
     public function processForm(): ?bool
@@ -109,70 +140,63 @@ class FormProcessor
         return false;
     }
 
+    private function handleFormData(): void
+    {
+        foreach ($this->formFields as $field => $info) {
+            $cleanField = rtrim($field, '[]');
+            $fieldType = $info['type'];
 
+            switch ($fieldType) {
+                case 'multiselect':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                    if (!empty($this->formData[$cleanField])) {
+                        $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
+                    } else {
+                        $this->formData[$cleanField] = null;
+                    }
+                    break;
 
-private function handleFormData(): void
-{
-    foreach ($this->formFields as $field => $info) {
-        $cleanField = rtrim($field, '[]');
-        $fieldType = $info['type'];
+                case 'select':
+                case 'radio':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    break;
 
-        switch ($fieldType) {
-            case 'multiselect':
-                $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
-                if (!empty($this->formData[$cleanField])) {
-                    $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
-                } else {
-                    $this->formData[$cleanField] = null;
-                }
-                break;
+                case 'checkbox':
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
+                    break;
 
-            case 'select':
-            case 'radio':
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                break;
+                case 'date':
+                    $dateValue = rex_post($cleanField, 'string', null);
+                    if (!empty($dateValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
+                    }
+                    break;
 
-            case 'checkbox':
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
-                break;
+                case 'time':
+                    $timeValue = rex_post($cleanField, 'string', null);
+                    if (!empty($timeValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
+                    }
+                    break;
 
-            case 'date':
-                // Datum formatieren mit rex_formatter::intlDate
-                $dateValue = rex_post($cleanField, 'string', null);
-                if (!empty($dateValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
-                }
-                break;
+                case 'datetime-local':
+                    $dateTimeValue = rex_post($cleanField, 'string', null);
+                    if (!empty($dateTimeValue)) {
+                        $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
+                    }
+                    break;
 
-            case 'time':
-                // Zeit formatieren mit rex_formatter::intlTime
-                $timeValue = rex_post($cleanField, 'string', null);
-                if (!empty($timeValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
-                }
-                break;
+                default:
+                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    break;
+            }
 
-            case 'datetime-local':
-                // Datum und Zeit formatieren mit rex_formatter::intlDateTime
-                $dateTimeValue = rex_post($cleanField, 'string', null);
-                if (!empty($dateTimeValue)) {
-                    $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
-                }
-                break;
-
-            default:
-                // Standardverarbeitung für Textfelder, E-Mails, etc.
-                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                break;
-        }
-
-        // Validierung für Pflichtfelder
-        if ($info['required'] && empty($this->formData[$cleanField])) {
-            $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+            // Validierung für Pflichtfelder
+            if ($info['required'] && empty($this->formData[$cleanField])) {
+                $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+            }
         }
     }
-}
-
 
     private function handleFileUploads(): void
     {
@@ -181,7 +205,15 @@ private function handleFormData(): void
             if (is_array($fileInfo['name'])) {
                 $this->processMultipleFiles($field, $fileInfo);
             } else {
-                $this->processSingleFile($field, $fileInfo);
+                // Prüfen, ob überhaupt eine Datei hochgeladen wurde
+                if (!empty($fileInfo['name'])) {
+                    $uploadPath = $this->processSingleFile($field, $fileInfo);
+                    if ($uploadPath) {
+                        $this->fileData[$field] = $uploadPath; // Datei speichern
+                    } else {
+                        $this->errors[] = "Fehler beim Hochladen der Datei: " . htmlspecialchars($fileInfo['name']);
+                    }
+                }
             }
         }
     }
@@ -227,7 +259,7 @@ private function handleFormData(): void
             if (move_uploaded_file($fileTmp, $uploadPath)) {
                 return $uploadPath; // Rückgabe des Datei-Pfads
             } else {
-                $this->errors[] = "Fehler beim Hochladen von " . ucfirst($field);
+                $this->errors[] = "Fehler beim Hochladen von " . ucfirst($field) . ". Temp-Datei: " . $fileTmp;
             }
         }
 
