@@ -242,6 +242,37 @@ class FormProcessor
         return null;
     }
 
+    use rex_yform_manager_dataset;
+
+    public function saveToYform(string $tableName, array $fieldMapping): bool
+    {
+        try {
+            // Neue YOrm-Datenbankzeile erstellen
+            $dataSet = rex_yform_manager_dataset::create($tableName);
+
+            // Formular-Daten durchlaufen
+            foreach ($this->formData as $field => $value) {
+                // Prüfen, ob es eine Zuordnung für das Formularfeld gibt
+                if (isset($fieldMapping[$field])) {
+                    $dbField = $fieldMapping[$field]; // Die zugeordnete Datenbankspalte
+                    // Prüfen, ob es die Spalte in der Datenbank gibt
+                    if ($dataSet->hasField($dbField)) {
+                        $dataSet->setValue($dbField, $value);
+                    }
+                }
+            }
+
+            // Datensatz speichern
+            $dataSet->save();
+            return true;
+        } catch (Exception $e) {
+            // Fehlerbehandlung
+            $this->errors[] = "Fehler beim Speichern in die YForm-Datenbank: " . $e->getMessage();
+            return false;
+        }
+    }
+
+
     private function sendEmail(): bool
     {
         $mail = new rex_mailer();
