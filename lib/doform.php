@@ -93,11 +93,22 @@ class FormProcessor
         foreach ($dom->getElementsByTagName('input') as $input) {
             $name = $input->getAttribute('name');
             $cleanField = rtrim($name, '[]');
+            $type = $input->getAttribute('type');
+
             if (isset($this->formData[$cleanField])) {
-                $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField]));
+                // Für Checkboxen und Radio-Buttons
+                if ($type === 'checkbox' || $type === 'radio') {
+                    if ($input->getAttribute('value') === $this->formData[$cleanField]) {
+                        $input->setAttribute('checked', 'checked');
+                    }
+                } else {
+                    // Für andere Input-Typen wie Text, E-Mail, etc.
+                    $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField]));
+                }
             }
         }
 
+        // Vorhandene Daten in Textareas einsetzen
         foreach ($dom->getElementsByTagName('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
             if (isset($this->formData[$name])) {
@@ -105,11 +116,13 @@ class FormProcessor
             }
         }
 
+        // Vorhandene Daten in Select-Elemente einsetzen
         foreach ($dom->getElementsByTagName('select') as $select) {
             $name = $select->getAttribute('name');
-            if (isset($this->formData[$name])) {
+            $cleanField = rtrim($name, '[]');
+            if (isset($this->formData[$cleanField])) {
                 foreach ($select->getElementsByTagName('option') as $option) {
-                    if ($option->getAttribute('value') === $this->formData[$name]) {
+                    if ($option->getAttribute('value') == $this->formData[$cleanField]) {
                         $option->setAttribute('selected', 'selected');
                     }
                 }
@@ -119,6 +132,7 @@ class FormProcessor
         // Geändertes HTML ausgeben
         echo $dom->saveHTML();
     }
+
 
     public function processForm(): ?bool
     {
