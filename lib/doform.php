@@ -2,11 +2,10 @@
 
 namespace klxm\doform;
 
-use IntlDateFormatter;
 use rex_formatter;
 use rex_mailer;
 use rex_path;
-use rex_yform_manager_dataset;
+use IntlDateFormatter;
 
 class FormProcessor
 {
@@ -15,7 +14,6 @@ class FormProcessor
     private array $formData = [];
     private array $fileData = [];
     private array $errors = [];
-    private array $fieldErrors = [];
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -23,8 +21,6 @@ class FormProcessor
     private string $emailSubject;
     private string $emailFrom;
     private string $emailTo;
-    private string $emailCc = '';
-    private string $emailBcc = '';
 
     public function __construct(string $formHtml, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)
     {
@@ -43,16 +39,6 @@ class FormProcessor
     public function setEmailTo(string $email): void
     {
         $this->emailTo = $email;
-    }
-
-    public function setEmailCc(string $email): void
-    {
-        $this->emailCc = $email;
-    }
-
-    public function setEmailBcc(string $email): void
-    {
-        $this->emailBcc = $email;
     }
 
     public function setEmailSubject(string $subject): void
@@ -98,110 +84,100 @@ class FormProcessor
         }
     }
 
-    public function displayForm(bool $showFieldErrors = false): void
+    public function displayForm(): void
     {
-        echo '<form>';
-        foreach ($this->formFields as $field => $info) {
-            echo '<label for="' . htmlspecialchars($field) . '">' . htmlspecialchars($info['label']) . '</label>';
-            echo '<input type="' . htmlspecialchars($info['type']) . '" name="' . htmlspecialchars($field) . '" id="' . htmlspecialchars($field) . '" value="' . htmlspecialchars($this->formData[$field] ?? '') . '">';
-
-            // Optional: Fehlermeldungen unter dem Feld anzeigen, falls gewünscht
-            if ($showFieldErrors && $error = $this->getFieldError($field)) {
-                echo '<div class="field-error">' . htmlspecialchars($error) . '</div>';
-            }
-        }
-        echo '</form>';
+        echo $this->formHtml;
     }
 
     public function processForm(): ?bool
     {
+        // Zeige das Formular nur bei GET-Anfragen an, oder wenn keine Daten übermittelt wurden
         if ($_SERVER["REQUEST_METHOD"] !== "POST") {
             return null;
         }
 
+        // Wenn es sich um eine POST-Anfrage handelt, verarbeite das Formular
         $this->handleFormData();
         $this->handleFileUploads();
 
+        // Wenn keine Fehler vorliegen, versende die E-Mail
         if (empty($this->errors)) {
             return $this->sendEmail();
         }
 
+        // Wenn Fehler aufgetreten sind, gebe false zurück
         return false;
     }
 
-    public function getFormData(): array
-    {
-        return $this->formData;
-    }
 
-    public function getFileData(): array
-    {
-        return $this->fileData;
-    }
 
-    private function handleFormData(): void
-    {
-        foreach ($this->formFields as $field => $info) {
-            $cleanField = rtrim($field, '[]');
-            $fieldType = $info['type'];
+private function handleFormData(): void
+{
+    foreach ($this->formFields as $field => $info) {
+        $cleanField = rtrim($field, '[]');
+        $fieldType = $info['type'];
 
-            switch ($fieldType) {
-                case 'multiselect':
-                    $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
-                    if (!empty($this->formData[$cleanField])) {
-                        $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
-                    } else {
-                        $this->formData[$cleanField] = null;
-                    }
-                    break;
+        switch ($fieldType) {
+            case 'multiselect':
+                $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                if (!empty($this->formData[$cleanField])) {
+                    $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
+                } else {
+                    $this->formData[$cleanField] = null;
+                }
+                break;
 
-                case 'select':
-                case 'radio':
-                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                    break;
+            case 'select':
+            case 'radio':
+                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                break;
 
-                case 'checkbox':
-                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
-                    break;
+            case 'checkbox':
+                $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
+                break;
 
-                case 'date':
-                    $dateValue = rex_post($cleanField, 'string', null);
-                    if (!empty($dateValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
-                    }
-                    break;
+            case 'date':
+                // Datum formatieren mit rex_formatter::intlDate
+                $dateValue = rex_post($cleanField, 'string', null);
+                if (!empty($dateValue)) {
+                    $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
+                }
+                break;
 
-                case 'time':
-                    $timeValue = rex_post($cleanField, 'string', null);
-                    if (!empty($timeValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
-                    }
-                    break;
+            case 'time':
+                // Zeit formatieren mit rex_formatter::intlTime
+                $timeValue = rex_post($cleanField, 'string', null);
+                if (!empty($timeValue)) {
+                    $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
+                }
+                break;
 
-                case 'datetime-local':
-                    $dateTimeValue = rex_post($cleanField, 'string', null);
-                    if (!empty($dateTimeValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
-                    }
-                    break;
+            case 'datetime-local':
+                // Datum und Zeit formatieren mit rex_formatter::intlDateTime
+                $dateTimeValue = rex_post($cleanField, 'string', null);
+                if (!empty($dateTimeValue)) {
+                    $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
+                }
+                break;
 
-                default:
-                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
-                    break;
-            }
+            default:
+                // Standardverarbeitung für Textfelder, E-Mails, etc.
+                $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                break;
+        }
 
-            // Validierung für Pflichtfelder
-            if ($info['required'] && empty($this->formData[$cleanField])) {
-                $errorMessage = ucfirst($cleanField) . " ist ein Pflichtfeld.";
-                $this->fieldErrors[$cleanField] = $errorMessage; // Fehler für das Feld speichern
-                $this->errors[] = $errorMessage;  // Globaler Fehler
-            }
+        // Validierung für Pflichtfelder
+        if ($info['required'] && empty($this->formData[$cleanField])) {
+            $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
         }
     }
+}
+
 
     private function handleFileUploads(): void
     {
         foreach ($_FILES as $field => $fileInfo) {
+            // Prüfen, ob es sich um mehrere Dateien handelt (z.B. files[])
             if (is_array($fileInfo['name'])) {
                 $this->processMultipleFiles($field, $fileInfo);
             } else {
@@ -213,7 +189,7 @@ class FormProcessor
     private function processMultipleFiles(string $field, array $fileInfo): void
     {
         $fileCount = count($fileInfo['name']);
-        $this->fileData[$field] = [];
+        $this->fileData[$field] = []; // Array für mehrere Dateien
 
         for ($i = 0; $i < $fileCount; $i++) {
             if (!empty($fileInfo['name'][$i])) {
@@ -226,7 +202,7 @@ class FormProcessor
                 ];
                 $uploadPath = $this->processSingleFile($field, $singleFile, true);
                 if ($uploadPath) {
-                    $this->fileData[$field][] = $uploadPath;
+                    $this->fileData[$field][] = $uploadPath; // Datei hochladen und Pfad speichern
                 }
             }
         }
@@ -239,6 +215,7 @@ class FormProcessor
         $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
         $fileSize = $fileInfo['size'];
 
+        // Validierung der Dateitypen und Größe
         if (!in_array($fileExt, $this->allowedExtensions)) {
             $this->errors[] = "Ungültiges Dateiformat für " . ucfirst($field) . ". Erlaubte Formate: " . implode(', ', $this->allowedExtensions);
         } elseif ($fileSize > $this->maxFileSize) {
@@ -248,7 +225,7 @@ class FormProcessor
             $uploadPath = $this->uploadDir . $newFileName;
 
             if (move_uploaded_file($fileTmp, $uploadPath)) {
-                return $uploadPath;
+                return $uploadPath; // Rückgabe des Datei-Pfads
             } else {
                 $this->errors[] = "Fehler beim Hochladen von " . ucfirst($field);
             }
@@ -263,41 +240,45 @@ class FormProcessor
         $mail->isHTML(true);
         $mail->CharSet = 'utf-8';
         $mail->From = $this->emailFrom;
-
-        $toAddresses = array_filter(array_map('trim', explode(',', $this->emailTo)));
-        foreach ($toAddresses as $email) {
-            $mail->addAddress($email);
-        }
-
-        if (!empty($this->emailCc)) {
-            $ccAddresses = array_filter(array_map('trim', explode(',', $this->emailCc)));
-            foreach ($ccAddresses as $email) {
-                $mail->addCC($email);
-            }
-        }
-
-        if (!empty($this->emailBcc)) {
-            $bccAddresses = array_filter(array_map('trim', explode(',', $this->emailBcc)));
-            foreach ($bccAddresses as $email) {
-                $mail->addBCC($email);
-            }
-        }
-
+        $mail->addAddress($this->emailTo);
         $mail->Subject = $this->emailSubject;
 
+        // E-Mail-Body erstellen
         $body = "<h1>{$this->emailSubject}</h1><ul>";
-        foreach ($this->formData as $field => $value) {
-            $label = $this->formFields[$field]['label'] ?? ucfirst($field);
-            $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . htmlspecialchars($value) . "</li>";
-        }
-        $body .= "</ul>";
 
-        if (!empty($this->fileData)) {
-            foreach ($this->fileData as $files) {
-                foreach ($files as $filePath) {
-                    $mail->addAttachment($filePath);
+        foreach ($this->formData as $field => $value) {
+            $label = !empty($this->formFields[$field]['label']) ? $this->formFields[$field]['label'] : ucfirst($field);
+
+            if (!empty($value)) {
+                if (is_array($value)) {
+                    $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . implode(', ', $value) . "</li>";
+                } else {
+                    $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . htmlspecialchars($value) . "</li>";
                 }
             }
+        }
+
+        $body .= "</ul>";
+
+        // Falls Dateien vorhanden sind, diese ebenfalls im Body angeben und als Anhang hinzufügen
+        if (!empty($this->fileData)) {
+            $body .= "<h2>Datei-Anhänge:</h2><ul>";
+            foreach ($this->fileData as $field => $files) {
+                if (is_array($files)) {
+                    foreach ($files as $filePath) {
+                        if (file_exists($filePath)) {
+                            $mail->addAttachment($filePath, basename($filePath));
+                            $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . ": " . basename($filePath) . "</li>";
+                        }
+                    }
+                } else {
+                    if (file_exists($files)) {
+                        $mail->addAttachment($files, basename($files));
+                        $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . ": " . basename($files) . "</li>";
+                    }
+                }
+            }
+            $body .= "</ul>";
         }
 
         $mail->Body = $body;
@@ -310,28 +291,6 @@ class FormProcessor
         return true;
     }
 
-    public function saveToYform(string $tableName, array $fieldMapping): bool
-    {
-        try {
-            $dataSet = rex_yform_manager_dataset::create($tableName);
-
-            foreach ($this->formData as $field => $value) {
-                if (isset($fieldMapping[$field])) {
-                    $dbField = $fieldMapping[$field];
-                    if ($dataSet->hasField($dbField)) {
-                        $dataSet->setValue($dbField, $value);
-                    }
-                }
-            }
-
-            $dataSet->save();
-            return true;
-        } catch (Exception $e) {
-            $this->errors[] = "Fehler beim Speichern in die YForm-Datenbank: " . $e->getMessage();
-            return false;
-        }
-    }
-
     public function displayErrors(): void
     {
         if (!empty($this->errors)) {
@@ -341,11 +300,6 @@ class FormProcessor
             }
             echo "</ul>";
         }
-    }
-
-    public function getFieldError(string $field): ?string
-    {
-        return $this->fieldErrors[$field] ?? null;
     }
 
     public function getFormHtml(): string
