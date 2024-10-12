@@ -7,6 +7,7 @@ use rex_formatter;
 use rex_mailer;
 use rex_path;
 use rex_yform_manager_dataset;
+use rex_session;
 
 class FormProcessor
 {
@@ -26,12 +27,22 @@ class FormProcessor
     private string $emailCc = '';
     private string $emailBcc = '';
 
+    // Für CSRF, Honeypot, und Session-basierte Validierungen
+    private string $csrfToken;
+    private string $honeypotField = 'honeypot';
+    private int $minTimeBetweenSubmissions = 60; // 60 Sekunden
+
     public function __construct(string $formHtml, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)
     {
         $this->formHtml = $formHtml;
         $this->uploadDir = rex_path::base($uploadDir);
         $this->allowedExtensions = $allowedExtensions;
         $this->maxFileSize = $maxFileSize;
+        
+        // CSRF-Token erzeugen
+        $this->csrfToken = bin2hex(random_bytes(32));
+        rex_session::set('csrf_token', $this->csrfToken);
+
         $this->parseForm();
     }
 
@@ -96,12 +107,27 @@ class FormProcessor
             $label = isset($labels[$name]) ? $labels[$name] : $textarea->getAttribute('placeholder');
             $this->formFields[$name] = ['type' => 'textarea', 'required' => $required, 'label' => $label];
         }
+
+        // CSRF und Honeypot als versteckte Felder hinzufügen
+        $this->formFields['csrf_token'] = ['type' => 'hidden', 'required' => true, 'label' => ''];
+        $this->formFields[$this->honeypotField] = ['type' => 'hidden', 'required' => false, 'label' => ''];
     }
 
     public function displayForm(bool $showFieldErrors = false): void
     {
-        echo '<form>';
+        echo '<form method="post">';
         foreach ($this->formFields as $field => $info) {
+            if ($info['type'] === 'hidden') {
+                // Versteckte Felder für CSRF und Honeypot
+                if ($field === 'csrf_token') {
+                    echo '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($this->csrfToken) . '">';
+                } elseif ($field === $this->honeypotField) {
+                    echo '<input type="text" name="' . htmlspecialchars($field) . '" style="display:none;">';
+                }
+                continue;
+            }
+            
+            // Normale Felder
             echo '<label for="' . htmlspecialchars($field) . '">' . htmlspecialchars($info['label']) . '</label>';
             echo '<input type="' . htmlspecialchars($info['type']) . '" name="' . htmlspecialchars($field) . '" id="' . htmlspecialchars($field) . '" value="' . htmlspecialchars($this->formData[$field] ?? '') . '">';
 
@@ -119,10 +145,30 @@ class FormProcessor
             return null;
         }
 
+        // CSRF-Überprüfung
+        if ($_POST['csrf_token'] !== rex_session::get('csrf_token')) {
+            $this->errors[] = "Ungültiges Formular-Token.";
+            return false;
+        }
+
+        // Honeypot-Überprüfung
+        if (!empty($_POST[$this->honeypotField])) {
+            $this->errors[] = "Spam erkannt.";
+            return false;
+        }
+
+        // Überprüfung auf Doppelversand (innerhalb von 60 Sekunden)
+        if (rex_session::has('last_form_submission') && (time() - rex_session::get('last_form_submission')) < $this->minTimeBetweenSubmissions) {
+            $this->errors[] = "Bitte warten Sie mindestens 60 Sekunden, bevor Sie das Formular erneut absenden.";
+            return false;
+        }
+
         $this->handleFormData();
         $this->handleFileUploads();
 
         if (empty($this->errors)) {
+            // Zeit des letzten Versands speichern, um Doppelversand zu verhindern
+            rex_session::set('last_form_submission', time());
             return $this->sendEmail();
         }
 
@@ -142,6 +188,10 @@ class FormProcessor
     private function handleFormData(): void
     {
         foreach ($this->formFields as $field => $info) {
+            if (in_array($field, ['csrf_token', $this->honeypotField])) {
+                continue; // Diese Felder sollen nicht in der E-Mail übertragen werden
+            }
+
             $cleanField = rtrim($field, '[]');
             $fieldType = $info['type'];
 
@@ -308,28 +358,6 @@ class FormProcessor
         }
 
         return true;
-    }
-
-    public function saveToYform(string $tableName, array $fieldMapping): bool
-    {
-        try {
-            $dataSet = rex_yform_manager_dataset::create($tableName);
-
-            foreach ($this->formData as $field => $value) {
-                if (isset($fieldMapping[$field])) {
-                    $dbField = $fieldMapping[$field];
-                    if ($dataSet->hasField($dbField)) {
-                        $dataSet->setValue($dbField, $value);
-                    }
-                }
-            }
-
-            $dataSet->save();
-            return true;
-        } catch (Exception $e) {
-            $this->errors[] = "Fehler beim Speichern in die YForm-Datenbank: " . $e->getMessage();
-            return false;
-        }
     }
 
     public function displayErrors(): void
