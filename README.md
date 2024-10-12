@@ -170,6 +170,31 @@ if ($formProcessor->processForm()) {
 
 ```
 
+## In YForm speichern
+
+Echt jetzt?
+Aber klar doch.
+
+```php
+$fieldMapping = [
+    'name' => 'Surname',
+    'email' => 'Email',
+    'phone' => 'PhoneNumber',
+];
+
+if ($formProcessor->processForm()) {
+    // Dynamisches Mapping beim Speichern in die YForm-Datenbank verwenden
+    if ($formProcessor->saveToYform('rex_your_table_name', $fieldMapping)) {
+        echo "Daten erfolgreich in die YForm-Datenbank geschrieben.";
+    } else {
+        echo "Fehler beim Speichern der Daten.";
+    }
+} else {
+    $formProcessor->displayErrors();
+}
+
+```
+
 
 ## Tipps & Tricks für File Uploads
 
