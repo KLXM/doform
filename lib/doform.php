@@ -360,6 +360,28 @@ class FormProcessor
         return true;
     }
 
+    public function saveToYform(string $tableName, array $fieldMapping): bool
+    {
+        try {
+            $dataSet = rex_yform_manager_dataset::create($tableName);
+
+            foreach ($this->formData as $field => $value) {
+                if (isset($fieldMapping[$field])) {
+                    $dbField = $fieldMapping[$field];
+                    if ($dataSet->hasField($dbField)) {
+                        $dataSet->setValue($dbField, $value);
+                    }
+                }
+            }
+
+            $dataSet->save();
+            return true;
+        } catch (Exception $e) {
+            $this->errors[] = "Fehler beim Speichern in die YForm-Datenbank: " . $e->getMessage();
+            return false;
+        }
+    }
+
     public function displayErrors(): void
     {
         if (!empty($this->errors)) {
