@@ -195,6 +195,28 @@ if ($formProcessor->processForm()) {
 
 ```
 
+## Details für Devs
+
+Hier ist die Übersicht als Tabelle:
+
+| **Methode** | **Beschreibung** | **Rückgabewert** |
+|-------------|------------------|------------------|
+| `__construct(string $formHtml, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)` | Konstruktor, der das Formular-HTML, den Upload-Ordner, erlaubte Dateiendungen und maximale Dateigröße initialisiert und das Formular parst. | Keiner (Konstruktor) |
+| `setEmailFrom(string $email): void` | Setzt die E-Mail-Adresse des Absenders (`From`). | `void` |
+| `setEmailTo(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen des Empfängers (`To`). | `void` |
+| `setEmailCc(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen für den `Cc`-Kopfbereich der E-Mail. | `void` |
+| `setEmailBcc(string $email): void` | Setzt eine oder mehrere (Komma-getrennte) E-Mail-Adressen für den `Bcc`-Kopfbereich der E-Mail. | `void` |
+| `setEmailSubject(string $subject): void` | Setzt den Betreff der E-Mail. | `void` |
+| `displayForm(): void` | Zeigt das Formular-HTML an (wenn noch keine POST-Daten gesendet wurden). | `void` |
+| `processForm(): ?bool` | Verarbeitet die übermittelten Formulardaten, validiert sie, lädt Dateien hoch und versendet E-Mails. Gibt `true` bei erfolgreicher Verarbeitung, `false` bei Fehlern oder `null` bei GET-Anfragen zurück. | `true`, `false`, `null` |
+| `getFormData(): array` | Gibt die verarbeiteten und bereinigten Formulardaten zurück. | `array` |
+| `getFileData(): array` | Gibt die hochgeladenen Dateien zurück, falls Dateien übermittelt wurden. | `array` |
+| `saveToYform(string $tableName, array $fieldMapping): bool` | Speichert die verarbeiteten Formulardaten in einer YForm-Datenbanktabelle. Gibt `true` zurück, wenn das Speichern erfolgreich war, oder `false` bei Fehlern. | `true`, `false` |
+| `displayErrors(): void` | Gibt alle während der Formularverarbeitung aufgetretenen Fehler aus. | `void` |
+| `getFormHtml(): string` | Gibt das ursprüngliche HTML des Formulars zurück. | `string` |
+
+---
+
 
 ## Tipps & Tricks für File Uploads
 
