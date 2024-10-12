@@ -11,6 +11,8 @@ Ich bin zurück und ganz neu! 🎉 doForm ist jetzt cooler und flexibler als je 
 - E-Mail-Versand der Formulardaten inklusive Dateianhänge
 - Integrierte Fehlerbehandlung und -anzeige
 - Einfache Anpassung und Erweiterung
+- **Flexible Zuordnung von Formularfeldern zu YForm-Datenbankspalten**
+- **Komma-getrennte Unterstützung für Mehrfach-Empfänger in To, Cc und Bcc**
 
 ## Das Herz von doForm: Der FormProcessor
 
@@ -21,6 +23,12 @@ Der FormProcessor ist das Herzstück von doForm. Er kümmert sich um all die kom
 - **Handhabt Datei-Uploads sicher und effizient**
 - Sendet die gesammelten Daten und Dateien per E-Mail
 - Handhabt Fehler und zeigt sie benutzerfreundlich an
+- **Speichert die Formulardaten direkt in eine YForm-Datenbanktabelle**
+- Unterstützt das Hinzufügen von Empfängern per `To`, `Cc` und `Bcc`, sowohl für einzelne als auch für mehrere E-Mail-Adressen (Komma-getrennt)
+- **Flexibel anpassbar**, um den Bedürfnissen deines REDAXO-Projekts gerecht zu werden
+
+
+Die Ergänzungen heben weitere Kernfunktionen hervor, wie z. B. die Unterstützung für YForm-Datenbanken und die Flexibilität beim E-Mail-Versand.
 
 ## Installation
 
