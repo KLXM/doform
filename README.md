@@ -143,6 +143,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 ```
 
+## Daten nach dem Versand verarbeiten?
+
+Ja klar… z.B. so: 
+
+```php
+if ($formProcessor->processForm()) {
+    $formData = $formProcessor->getFormData();
+    $fileData = $formProcessor->getFileData();
+
+    // Formulardaten weiterverarbeiten
+    foreach ($formData as $field => $value) {
+        echo "Feld: $field, Wert: $value<br>";
+    }
+
+    // Dateidaten weiterverarbeiten
+    foreach ($fileData as $field => $files) {
+        echo "Dateien für $field:<br>";
+        foreach ($files as $filePath) {
+            echo "Hochgeladene Datei: " . basename($filePath) . "<br>";
+        }
+    }
+} else {
+    $formProcessor->displayErrors();
+}
+
+```
+
+
 ## Tipps & Tricks für File Uploads
 
 - Verwende immer `enctype="multipart/form-data"` in deinem Formular-Tag für File Uploads
