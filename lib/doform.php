@@ -336,6 +336,18 @@ class FormProcessor
 
         return true;
     }
+    
+    // Methode zum Abrufen der verarbeiteten Formulardaten
+    public function getProcessedFormData(): array
+    {
+        return $this->formData;
+    }
+
+    // Methode zum Abrufen der hochgeladenen Dateien
+    public function getUploadedFiles(): array
+    {
+        return $this->fileData;
+    }
 
     public function displayErrors(): void
     {
