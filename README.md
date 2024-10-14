@@ -43,20 +43,18 @@ $formHtml = '
     <button type="submit">Absenden</button>
 </form>';
 
-$processor = new FormProcessor($formHtml, 'media/uploads/', ['pdf', 'doc', 'docx'], 5 * 1024 * 1024);
+$processor = new FormProcessor($formHtml, 'contact_form', ['pdf', 'doc', 'docx'], 5 * 1024 * 1024, 'media/uploads/');
 
 $processor->setEmailFrom('noreply@example.com');
 $processor->setEmailTo('empfaenger@example.com');
 $processor->setEmailSubject('Neue Formular-Einreichung mit Datei');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $result = $processor->processForm();
-    if ($result === true) {
-        echo "Formular erfolgreich versendet!";
-    } elseif ($result === false) {
-        $processor->displayErrors();
-        $processor->displayForm();
-    }
+$result = $processor->processForm();
+if ($result === true) {
+    echo "Formular erfolgreich versendet!";
+} elseif ($result === false) {
+    $processor->displayErrors();
+    $processor->displayForm();
 } else {
     $processor->displayForm();
 }
@@ -69,9 +67,10 @@ Bei der Initialisierung des FormProcessors können Sie die Datei-Upload-Einstell
 ```php
 $processor = new FormProcessor(
     $formHtml,
-    'media/uploads/',         // Upload-Verzeichnis
+    'upload_form',
     ['pdf', 'jpg', 'png'],    // Erlaubte Dateitypen
-    5 * 1024 * 1024           // Maximale Dateigröße in Bytes (hier 5 MB)
+    5 * 1024 * 1024,          // Maximale Dateigröße in Bytes (hier 5 MB)
+    'media/uploads/'          // Upload-Verzeichnis
 );
 ```
 
@@ -120,23 +119,27 @@ $formHtml = <<<HTML
 HTML;
 
 // Initialisierung des FormProcessors
-$processor = new FormProcessor($formHtml, 'media/uploads/', ['jpg', 'jpeg', 'png', 'gif'], 5 * 1024 * 1024);
+$processor = new FormProcessor(
+    $formHtml,
+    'party_form',
+    ['jpg', 'jpeg', 'png', 'gif'],
+    5 * 1024 * 1024,
+    'media/uploads/'
+);
 
 $processor->setEmailFrom('noreply@doform-party.com');
 $processor->setEmailTo('party@doform-party.com');
 $processor->setEmailSubject('Neue Anmeldung zur doForm!-Party');
 
 // Formularverarbeitung
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $result = $processor->processForm();
-    if ($result === true) {
-        echo "<p class='success'>Juhu! Du bist zur doForm!-Party angemeldet. Wir freuen uns auf dich und dein Foto!</p>";
-    } elseif ($result === false) {
-        echo "<div class='error-container'>";
-        $processor->displayErrors();
-        echo "</div>";
-        $processor->displayForm();
-    }
+$result = $processor->processForm();
+if ($result === true) {
+    echo "<p class='success'>Juhu! Du bist zur doForm!-Party angemeldet. Wir freuen uns auf dich und dein Foto!</p>";
+} elseif ($result === false) {
+    echo "<div class='error-container'>";
+    $processor->displayErrors();
+    echo "</div>";
+    $processor->displayForm();
 } else {
     $processor->displayForm();
 }
