@@ -9,6 +9,7 @@ use IntlDateFormatter;
 
 class FormProcessor
 {
+    private string $formId;
     private string $formHtml;
     private array $formFields = [];
     private array $formData = [];
@@ -22,8 +23,9 @@ class FormProcessor
     private string $emailFrom;
     private string $emailTo;
 
-    public function __construct(string $formHtml, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)
+    public function __construct(string $formHtml, string $formId, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)
     {
+        $this->formId = $formId;
         $this->formHtml = $formHtml;
         $this->uploadDir = rex_path::base($uploadDir);
         $this->allowedExtensions = $allowedExtensions;
@@ -88,6 +90,14 @@ class FormProcessor
     {
         $dom = new \DOMDocument();
         @$dom->loadHTML($this->formHtml);
+        $form = $dom->getElementsByTagName('form')->item(0);
+        
+        // Add a hidden input for the form ID
+        $hiddenInput = $dom->createElement('input');
+        $hiddenInput->setAttribute('type', 'hidden');
+        $hiddenInput->setAttribute('name', $this->formId);
+        $hiddenInput->setAttribute('value', '1');
+        $form->appendChild($hiddenInput);
 
         // Vorhandene Daten in die Formularfelder einsetzen
         foreach ($dom->getElementsByTagName('input') as $input) {
@@ -96,19 +106,16 @@ class FormProcessor
             $type = $input->getAttribute('type');
 
             if (isset($this->formData[$cleanField])) {
-                // Für Checkboxen und Radio-Buttons
                 if ($type === 'checkbox' || $type === 'radio') {
                     if ($input->getAttribute('value') === $this->formData[$cleanField]) {
                         $input->setAttribute('checked', 'checked');
                     }
                 } else {
-                    // Für andere Input-Typen wie Text, E-Mail, etc.
                     $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField]));
                 }
             }
         }
 
-        // Vorhandene Daten in Textareas einsetzen
         foreach ($dom->getElementsByTagName('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
             if (isset($this->formData[$name])) {
@@ -116,7 +123,6 @@ class FormProcessor
             }
         }
 
-        // Vorhandene Daten in Select-Elemente einsetzen
         foreach ($dom->getElementsByTagName('select') as $select) {
             $name = $select->getAttribute('name');
             $cleanField = rtrim($name, '[]');
@@ -129,28 +135,22 @@ class FormProcessor
             }
         }
 
-        // Geändertes HTML ausgeben
         echo $dom->saveHTML();
     }
 
-
     public function processForm(): ?bool
     {
-        // Zeige das Formular nur bei GET-Anfragen an, oder wenn keine Daten übermittelt wurden
-        if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+        if ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST[$this->formId])) {
             return null;
         }
 
-        // Wenn es sich um eine POST-Anfrage handelt, verarbeite das Formular
         $this->handleFormData();
         $this->handleFileUploads();
 
-        // Wenn keine Fehler vorliegen, versende die E-Mail
         if (empty($this->errors)) {
             return $this->sendEmail();
         }
 
-        // Wenn Fehler aufgetreten sind, gebe false zurück
         return false;
     }
 
@@ -205,7 +205,6 @@ class FormProcessor
                     break;
             }
 
-            // Validierung für Pflichtfelder
             if ($info['required'] && empty($this->formData[$cleanField])) {
                 $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
             }
@@ -215,15 +214,13 @@ class FormProcessor
     private function handleFileUploads(): void
     {
         foreach ($_FILES as $field => $fileInfo) {
-            // Prüfen, ob es sich um mehrere Dateien handelt (z.B. files[])
             if (is_array($fileInfo['name'])) {
                 $this->processMultipleFiles($field, $fileInfo);
             } else {
-                // Prüfen, ob überhaupt eine Datei hochgeladen wurde
                 if (!empty($fileInfo['name'])) {
                     $uploadPath = $this->processSingleFile($field, $fileInfo);
                     if ($uploadPath) {
-                        $this->fileData[$field] = $uploadPath; // Datei speichern
+                        $this->fileData[$field] = $uploadPath;
                     } else {
                         $this->errors[] = "Fehler beim Hochladen der Datei: " . htmlspecialchars($fileInfo['name']);
                     }
@@ -235,7 +232,7 @@ class FormProcessor
     private function processMultipleFiles(string $field, array $fileInfo): void
     {
         $fileCount = count($fileInfo['name']);
-        $this->fileData[$field] = []; // Array für mehrere Dateien
+        $this->fileData[$field] = [];
 
         for ($i = 0; $i < $fileCount; $i++) {
             if (!empty($fileInfo['name'][$i])) {
@@ -248,7 +245,7 @@ class FormProcessor
                 ];
                 $uploadPath = $this->processSingleFile($field, $singleFile, true);
                 if ($uploadPath) {
-                    $this->fileData[$field][] = $uploadPath; // Datei hochladen und Pfad speichern
+                    $this->fileData[$field][] = $uploadPath;
                 }
             }
         }
@@ -261,7 +258,6 @@ class FormProcessor
         $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
         $fileSize = $fileInfo['size'];
 
-        // Validierung der Dateitypen und Größe
         if (!in_array($fileExt, $this->allowedExtensions)) {
             $this->errors[] = "Ungültiges Dateiformat für " . ucfirst($field) . ". Erlaubte Formate: " . implode(', ', $this->allowedExtensions);
         } elseif ($fileSize > $this->maxFileSize) {
@@ -271,7 +267,7 @@ class FormProcessor
             $uploadPath = $this->uploadDir . $newFileName;
 
             if (move_uploaded_file($fileTmp, $uploadPath)) {
-                return $uploadPath; // Rückgabe des Datei-Pfads
+                return $uploadPath;
             } else {
                 $this->errors[] = "Fehler beim Hochladen von " . ucfirst($field) . ". Temp-Datei: " . $fileTmp;
             }
@@ -289,7 +285,6 @@ class FormProcessor
         $mail->addAddress($this->emailTo);
         $mail->Subject = $this->emailSubject;
 
-        // E-Mail-Body erstellen
         $body = "<h1>{$this->emailSubject}</h1><ul>";
 
         foreach ($this->formData as $field => $value) {
@@ -306,7 +301,6 @@ class FormProcessor
 
         $body .= "</ul>";
 
-        // Falls Dateien vorhanden sind, diese ebenfalls im Body angeben und als Anhang hinzufügen
         if (!empty($this->fileData)) {
             $body .= "<h2>Datei-Anhänge:</h2><ul>";
             foreach ($this->fileData as $field => $files) {
@@ -337,13 +331,11 @@ class FormProcessor
         return true;
     }
     
-    // Methode zum Abrufen der verarbeiteten Formulardaten
     public function getProcessedFormData(): array
     {
         return $this->formData;
     }
 
-    // Methode zum Abrufen der hochgeladenen Dateien
     public function getUploadedFiles(): array
     {
         return $this->fileData;
