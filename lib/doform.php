@@ -23,13 +23,18 @@ class FormProcessor
     private string $emailFrom;
     private string $emailTo;
 
-    public function __construct(string $formHtml, string $formId, string $uploadDir = 'media/uploads/', array $allowedExtensions = ['pdf', 'doc', 'docx'], int $maxFileSize = 10 * 1024 * 1024)
-    {
+    public function __construct(
+        string $formHtml, 
+        string $formId, 
+        array $allowedExtensions = ['pdf', 'doc', 'docx'], 
+        int $maxFileSize = 10 * 1024 * 1024,
+        string $uploadDir = 'media/uploads/'
+    ) {
         $this->formId = $formId;
         $this->formHtml = $formHtml;
-        $this->uploadDir = rex_path::base($uploadDir);
         $this->allowedExtensions = $allowedExtensions;
         $this->maxFileSize = $maxFileSize;
+        $this->uploadDir = rex_path::base($uploadDir);
         $this->parseForm();
     }
 
