@@ -94,7 +94,7 @@ class FormProcessor
     public function displayForm(): void
     {
         $dom = new \DOMDocument();
-        @$dom->loadHTML($this->formHtml);
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         $form = $dom->getElementsByTagName('form')->item(0);
         
         // Add a hidden input for the form ID
