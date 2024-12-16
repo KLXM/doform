@@ -285,18 +285,12 @@ private function sendEmail(): bool
 {
     $mail = new rex_mailer();
     $mail->CharSet = 'UTF-8';
-    $mail->Encoding = 'base64';
     $mail->isHTML(true);
-    $mail->ContentType = 'text/html; charset=UTF-8';
     $mail->From = $this->emailFrom;
     $mail->addAddress($this->emailTo);
-    $mail->Subject = $this->emailSubject;
+    $mail->Subject = mb_encode_mimeheader($this->emailSubject, 'UTF-8');
 
-    $body = "<!DOCTYPE html>\n";
-    $body .= "<html>\n<head>";
-    $body .= "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">\n";
-    $body .= "</head>\n<body>\n";
-    $body .= "<h1>{$this->emailSubject}</h1>\n<ul>";
+    $body = "<h1>{$this->emailSubject}</h1>\n<ul>";
 
     $elements = $this->getOrderedFormElements();
     foreach ($elements as $field) {
@@ -305,11 +299,11 @@ private function sendEmail(): bool
                      $this->formFields[$field]['label'] : 
                      ucfirst($field);
             
-            $body .= "\n<li><strong>" . $label . ":</strong> ";
+            $body .= "\n<li><strong>" . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . ":</strong> ";
             if (is_array($this->formData[$field])) {
-                $body .= implode(', ', $this->formData[$field]);
+                $body .= htmlspecialchars(implode(', ', $this->formData[$field]), ENT_QUOTES, 'UTF-8');
             } else {
-                $body .= $this->formData[$field];
+                $body .= htmlspecialchars($this->formData[$field], ENT_QUOTES, 'UTF-8');
             }
             $body .= "</li>";
         }
@@ -317,7 +311,6 @@ private function sendEmail(): bool
 
     $body .= "\n</ul>";
 
-    // Dateianhänge
     if (!empty($this->fileData)) {
         $body .= "\n<h2>Datei-Anhänge:</h2>\n<ul>";
         foreach ($this->fileData as $field => $files) {
@@ -326,23 +319,22 @@ private function sendEmail(): bool
                     if (file_exists($filePath)) {
                         $mail->addAttachment($filePath, basename($filePath));
                         $body .= "\n<li>" . 
-                                ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                                ": " . basename($filePath) . "</li>";
+                                htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field), ENT_QUOTES, 'UTF-8') . 
+                                ": " . htmlspecialchars(basename($filePath), ENT_QUOTES, 'UTF-8') . "</li>";
                     }
                 }
             } else {
                 if (file_exists($files)) {
                     $mail->addAttachment($files, basename($files));
                     $body .= "\n<li>" . 
-                            ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                            ": " . basename($files) . "</li>";
+                            htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field), ENT_QUOTES, 'UTF-8') . 
+                            ": " . htmlspecialchars(basename($files), ENT_QUOTES, 'UTF-8') . "</li>";
                 }
             }
         }
         $body .= "\n</ul>";
     }
 
-    $body .= "\n</body>\n</html>";
     $mail->Body = $body;
 
     if (!$mail->send()) {
