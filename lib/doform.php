@@ -54,42 +54,88 @@ class FormProcessor
     }
 
     private function parseForm(): void
-    {
-        $dom = new \DOMDocument();
-        @$dom->loadHTML($this->formHtml);
-        $form = $dom->getElementsByTagName('form')->item(0);
+{
+    $dom = new \DOMDocument('1.0', 'UTF-8');
+    $dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+    $form = $dom->getElementsByTagName('form')->item(0);
 
-        // Labels erfassen
-        $labels = [];
-        foreach ($form->getElementsByTagName('label') as $label) {
-            $for = $label->getAttribute('for');
-            $labels[$for] = trim($label->nodeValue);
-        }
-
-        // Inputs und andere Formularelemente sammeln
-        foreach ($form->getElementsByTagName('input') as $input) {
-            $name = $input->getAttribute('name');
-            $type = $input->getAttribute('type') ?: 'text';
-            $required = $input->hasAttribute('required');
-            $label = isset($labels[$name]) ? $labels[$name] : $input->getAttribute('placeholder');
-            $this->formFields[$name] = ['type' => $type, 'required' => $required, 'label' => $label];
-        }
-
-        foreach ($form->getElementsByTagName('select') as $select) {
-            $name = $select->getAttribute('name');
-            $multiple = $select->hasAttribute('multiple');
-            $required = $select->hasAttribute('required');
-            $label = isset($labels[$name]) ? $labels[$name] : null;
-            $this->formFields[$name] = ['type' => $multiple ? 'multiselect' : 'select', 'required' => $required, 'label' => $label];
-        }
-
-        foreach ($form->getElementsByTagName('textarea') as $textarea) {
-            $name = $textarea->getAttribute('name');
-            $required = $textarea->hasAttribute('required');
-            $label = isset($labels[$name]) ? $labels[$name] : $textarea->getAttribute('placeholder');
-            $this->formFields[$name] = ['type' => 'textarea', 'required' => $required, 'label' => $label];
+    // Labels erfassen
+    $labels = [];
+    foreach ($form->getElementsByTagName('label') as $label) {
+        $for = $label->getAttribute('for');
+        if ($for) {
+            $labels[$for] = trim($label->textContent);
         }
     }
+
+    // Inputs und andere Formularelemente sammeln
+    foreach ($form->getElementsByTagName('input') as $input) {
+        $name = $input->getAttribute('name');
+        $type = $input->getAttribute('type') ?: 'text';
+        $required = $input->hasAttribute('required');
+        
+        // Handle array inputs
+        $cleanName = rtrim($name, '[]');
+        $label = '';
+        
+        // Try to find label by input id first
+        $inputId = $input->getAttribute('id');
+        if ($inputId && isset($labels[$inputId])) {
+            $label = $labels[$inputId];
+        } 
+        // If no label found by id, try to find by clean name
+        elseif (isset($labels[$cleanName])) {
+            $label = $labels[$cleanName];
+        }
+        // Fallback to placeholder
+        else {
+            $label = $input->getAttribute('placeholder');
+        }
+        
+        $this->formFields[$name] = [
+            'type' => $type, 
+            'required' => $required, 
+            'label' => $label,
+            'isArray' => str_ends_with($name, '[]')
+        ];
+    }
+
+    foreach ($form->getElementsByTagName('select') as $select) {
+        $name = $select->getAttribute('name');
+        $cleanName = rtrim($name, '[]');
+        $multiple = $select->hasAttribute('multiple');
+        $required = $select->hasAttribute('required');
+        
+        $label = '';
+        if (isset($labels[$select->getAttribute('id')])) {
+            $label = $labels[$select->getAttribute('id')];
+        } elseif (isset($labels[$cleanName])) {
+            $label = $labels[$cleanName];
+        }
+        
+        $this->formFields[$name] = [
+            'type' => $multiple ? 'multiselect' : 'select',
+            'required' => $required,
+            'label' => $label,
+            'isArray' => str_ends_with($name, '[]')
+        ];
+    }
+
+    foreach ($form->getElementsByTagName('textarea') as $textarea) {
+        $name = $textarea->getAttribute('name');
+        $required = $textarea->hasAttribute('required');
+        $label = isset($labels[$textarea->getAttribute('id')]) 
+            ? $labels[$textarea->getAttribute('id')] 
+            : $textarea->getAttribute('placeholder');
+            
+        $this->formFields[$name] = [
+            'type' => 'textarea',
+            'required' => $required,
+            'label' => $label,
+            'isArray' => false
+        ];
+    }
+}
 
     public function displayForm(): void
     {
