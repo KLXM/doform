@@ -281,76 +281,43 @@ class FormProcessor
         return null;
     }
 
-    private function sendEmail(): bool
+private function sendEmail(): bool
 {
     $mail = new rex_mailer();
+    $mail->CharSet = 'UTF-8';
+    $mail->Encoding = 'base64';
     $mail->isHTML(true);
-    $mail->CharSet = 'utf-8';
+    $mail->ContentType = 'text/html; charset=UTF-8';
     $mail->From = $this->emailFrom;
     $mail->addAddress($this->emailTo);
-    $mail->Subject = $this->emailSubject;
+    $mail->Subject = '=?UTF-8?B?' . base64_encode($this->emailSubject) . '?=';
 
-    // Erstelle eine sortierte Liste der Formularfelder basierend auf ihrer Position im HTML
-    $sortedFields = [];
-    $dom = new \DOMDocument();
-    @$dom->loadHTML($this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-    
-    // Sammle alle Input-Elemente in der Reihenfolge ihres Erscheinens
-    $xpath = new \DOMXPath($dom);
-    $elements = $xpath->query('//input|//textarea|//select');
-    
-    foreach ($elements as $element) {
-        $name = $element->getAttribute('name');
-        if ($name) {
-            $cleanName = rtrim($name, '[]');
-            $sortedFields[$cleanName] = true;
-        }
-    }
+    $elements = $this->getOrderedFormElements();
+    $body = "<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\">
+</head>
+<body>
+<h1>{$this->emailSubject}</h1><ul>";
 
-    $body = "<h1>{$this->emailSubject}</h1><ul>";
-
-    // Verwende die sortierte Liste für die E-Mail-Ausgabe
-    foreach (array_keys($sortedFields) as $field) {
+    foreach ($elements as $field) {
         if (isset($this->formData[$field]) && !empty($this->formData[$field])) {
             $label = !empty($this->formFields[$field]['label']) ? 
                      $this->formFields[$field]['label'] : 
                      ucfirst($field);
 
             if (is_array($this->formData[$field])) {
-                $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . 
-                        implode(', ', $this->formData[$field]) . "</li>";
+                $body .= "<li><strong>" . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . ":</strong> " . 
+                        htmlspecialchars(implode(', ', $this->formData[$field]), ENT_QUOTES, 'UTF-8') . "</li>";
             } else {
-                $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . 
-                        htmlspecialchars($this->formData[$field]) . "</li>";
+                $body .= "<li><strong>" . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . ":</strong> " . 
+                        htmlspecialchars($this->formData[$field], ENT_QUOTES, 'UTF-8') . "</li>";
             }
         }
     }
 
-    $body .= "</ul>";
-
-    // Anhänge hinzufügen
-    if (!empty($this->fileData)) {
-        $body .= "<h2>Datei-Anhänge:</h2><ul>";
-        foreach ($this->fileData as $field => $files) {
-            if (is_array($files)) {
-                foreach ($files as $filePath) {
-                    if (file_exists($filePath)) {
-                        $mail->addAttachment($filePath, basename($filePath));
-                        $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                                ": " . basename($filePath) . "</li>";
-                    }
-                }
-            } else {
-                if (file_exists($files)) {
-                    $mail->addAttachment($files, basename($files));
-                    $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                            ": " . basename($files) . "</li>";
-                }
-            }
-        }
-        $body .= "</ul>";
-    }
-
+    $body .= "</ul></body></html>";
     $mail->Body = $body;
 
     if (!$mail->send()) {
@@ -359,6 +326,27 @@ class FormProcessor
     }
 
     return true;
+}
+
+private function getOrderedFormElements(): array
+{
+    $sortedFields = [];
+    $dom = new \DOMDocument();
+    @$dom->loadHTML(mb_convert_encoding($this->formHtml, 'HTML-ENTITIES', 'UTF-8'), 
+        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+    
+    $xpath = new \DOMXPath($dom);
+    $elements = $xpath->query('//input|//textarea|//select');
+    
+    foreach ($elements as $element) {
+        $name = $element->getAttribute('name');
+        if ($name) {
+            $cleanName = rtrim($name, '[]');
+            $sortedFields[] = $cleanName;
+        }
+    }
+    
+    return array_unique($sortedFields);
 }
     public function getProcessedFormData(): array
     {
