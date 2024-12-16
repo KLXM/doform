@@ -282,60 +282,84 @@ class FormProcessor
     }
 
     private function sendEmail(): bool
-    {
-        $mail = new rex_mailer();
-        $mail->isHTML(true);
-        $mail->CharSet = 'utf-8';
-        $mail->From = $this->emailFrom;
-        $mail->addAddress($this->emailTo);
-        $mail->Subject = $this->emailSubject;
+{
+    $mail = new rex_mailer();
+    $mail->isHTML(true);
+    $mail->CharSet = 'utf-8';
+    $mail->From = $this->emailFrom;
+    $mail->addAddress($this->emailTo);
+    $mail->Subject = $this->emailSubject;
 
-        $body = "<h1>{$this->emailSubject}</h1><ul>";
-
-        foreach ($this->formData as $field => $value) {
-            $label = !empty($this->formFields[$field]['label']) ? $this->formFields[$field]['label'] : ucfirst($field);
-
-            if (!empty($value)) {
-                if (is_array($value)) {
-                    $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . implode(', ', $value) . "</li>";
-                } else {
-                    $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . htmlspecialchars($value) . "</li>";
-                }
-            }
-        }
-
-        $body .= "</ul>";
-
-        if (!empty($this->fileData)) {
-            $body .= "<h2>Datei-Anhänge:</h2><ul>";
-            foreach ($this->fileData as $field => $files) {
-                if (is_array($files)) {
-                    foreach ($files as $filePath) {
-                        if (file_exists($filePath)) {
-                            $mail->addAttachment($filePath, basename($filePath));
-                            $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . ": " . basename($filePath) . "</li>";
-                        }
-                    }
-                } else {
-                    if (file_exists($files)) {
-                        $mail->addAttachment($files, basename($files));
-                        $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . ": " . basename($files) . "</li>";
-                    }
-                }
-            }
-            $body .= "</ul>";
-        }
-
-        $mail->Body = $body;
-
-        if (!$mail->send()) {
-            $this->errors[] = "E-Mail konnte nicht gesendet werden. Fehler: " . $mail->ErrorInfo;
-            return false;
-        }
-
-        return true;
-    }
+    // Erstelle eine sortierte Liste der Formularfelder basierend auf ihrer Position im HTML
+    $sortedFields = [];
+    $dom = new \DOMDocument();
+    @$dom->loadHTML($this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
     
+    // Sammle alle Input-Elemente in der Reihenfolge ihres Erscheinens
+    $xpath = new \DOMXPath($dom);
+    $elements = $xpath->query('//input|//textarea|//select');
+    
+    foreach ($elements as $element) {
+        $name = $element->getAttribute('name');
+        if ($name) {
+            $cleanName = rtrim($name, '[]');
+            $sortedFields[$cleanName] = true;
+        }
+    }
+
+    $body = "<h1>{$this->emailSubject}</h1><ul>";
+
+    // Verwende die sortierte Liste für die E-Mail-Ausgabe
+    foreach (array_keys($sortedFields) as $field) {
+        if (isset($this->formData[$field]) && !empty($this->formData[$field])) {
+            $label = !empty($this->formFields[$field]['label']) ? 
+                     $this->formFields[$field]['label'] : 
+                     ucfirst($field);
+
+            if (is_array($this->formData[$field])) {
+                $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . 
+                        implode(', ', $this->formData[$field]) . "</li>";
+            } else {
+                $body .= "<li><strong>" . htmlspecialchars($label) . ":</strong> " . 
+                        htmlspecialchars($this->formData[$field]) . "</li>";
+            }
+        }
+    }
+
+    $body .= "</ul>";
+
+    // Anhänge hinzufügen
+    if (!empty($this->fileData)) {
+        $body .= "<h2>Datei-Anhänge:</h2><ul>";
+        foreach ($this->fileData as $field => $files) {
+            if (is_array($files)) {
+                foreach ($files as $filePath) {
+                    if (file_exists($filePath)) {
+                        $mail->addAttachment($filePath, basename($filePath));
+                        $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                                ": " . basename($filePath) . "</li>";
+                    }
+                }
+            } else {
+                if (file_exists($files)) {
+                    $mail->addAttachment($files, basename($files));
+                    $body .= "<li>" . htmlspecialchars($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                            ": " . basename($files) . "</li>";
+                }
+            }
+        }
+        $body .= "</ul>";
+    }
+
+    $mail->Body = $body;
+
+    if (!$mail->send()) {
+        $this->errors[] = "E-Mail konnte nicht gesendet werden. Fehler: " . $mail->ErrorInfo;
+        return false;
+    }
+
+    return true;
+}
     public function getProcessedFormData(): array
     {
         return $this->formData;
