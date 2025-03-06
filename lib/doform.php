@@ -376,8 +376,13 @@ private function sendEmail(): bool
         }
         $body .= "\n</ul>";
     }
-
+    // sprog installed and activated? 
+    if (rex_addon::get('sprog')->isAvailable()) {
+    $mail->Body = sprogdown($body, 1);
+    } 
+    else {
     $mail->Body = $body;
+    }
     return $mail->send();
 }
 
