@@ -16,6 +16,7 @@ class FormProcessor
     private array $formData = [];
     private array $fileData = [];
     private array $errors = [];
+    private array $dontSendFields = []; // Array für Felder mit data-dontsend Attribut
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -36,7 +37,28 @@ class FormProcessor
         $this->allowedExtensions = $allowedExtensions;
         $this->maxFileSize = $maxFileSize;
         $this->uploadDir = rex_path::base($uploadDir);
+        
+        // Felder mit data-dontsend identifizieren
+        $this->identifyDontSendFields();
+        
         $this->parseForm();
+    }
+    
+    private function identifyDontSendFields(): void
+    {
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        
+        $xpath = new \DOMXPath($dom);
+        $dontSendElements = $xpath->query('//*[@data-dontsend]');
+        
+        foreach ($dontSendElements as $element) {
+            $name = $element->getAttribute('name');
+            if ($name) {
+                $cleanName = rtrim($name, '[]');
+                $this->dontSendFields[] = $cleanName;
+            }
+        }
     }
 
     public function setEmailFrom(string $email): void
@@ -328,85 +350,98 @@ class FormProcessor
         return null;
     }
 
-private function sendEmail(): bool
-{
-    $mail = new rex_mailer();
-    $mail->CharSet = 'UTF-8';
-    $mail->isHTML(true);
-    $mail->setFrom($this->emailFrom);
-    $mail->addAddress($this->emailTo);
-    $mail->Subject = $this->emailSubject;
-
-    $elements = $this->getOrderedFormElements();
-    $body = '<h1>' . $this->emailSubject . "</h1>\n<ul>";
+    private function sendEmail(): bool
+    {
+        $mail = new rex_mailer();
+        $mail->CharSet = 'UTF-8';
+        $mail->isHTML(true);
+        $mail->setFrom($this->emailFrom);
+        $mail->addAddress($this->emailTo);
+        $mail->Subject = $this->emailSubject;
     
-    foreach ($elements as $field) {
-        if (isset($this->formData[$field]) && !empty($this->formData[$field])) {
-            $label = !empty($this->formFields[$field]['label']) ? 
-                     $this->formFields[$field]['label'] : 
-                     ucfirst($field);
+        $elements = $this->getOrderedFormElements();
+        $body = '<h1>' . $this->emailSubject . "</h1>\n<ul>";
+        
+        foreach ($elements as $field) {
+            // Felder mit data-dontsend überspringen
+            $cleanField = rtrim($field, '[]');
+            if (in_array($cleanField, $this->dontSendFields)) {
+                continue;
+            }
             
-            $value = is_array($this->formData[$field]) ? 
-                     implode(', ', $this->formData[$field]) : 
-                     $this->formData[$field];
-            
-            $body .= "\n<li><strong>" . $label . ':</strong> ' . $value . '</li>';
-        }
-    }
-
-    $body .= "\n</ul>";
-
-    if (!empty($this->fileData)) {
-        $body .= "\n<h2>Datei-Anhänge:</h2>\n<ul>";
-        foreach ($this->fileData as $field => $files) {
-            if (is_array($files)) {
-                foreach ($files as $filePath) {
-                    if (file_exists($filePath)) {
-                        $mail->addAttachment($filePath);
-                        $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                                ': ' . basename($filePath) . '</li>';
-                    }
-                }
-            } else {
-                if (file_exists($files)) {
-                    $mail->addAttachment($files);
-                    $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
-                            ': ' . basename($files) . '</li>';
-                }
+            if (isset($this->formData[$cleanField]) && !empty($this->formData[$cleanField])) {
+                $label = !empty($this->formFields[$field]['label']) ? 
+                        $this->formFields[$field]['label'] : 
+                        ucfirst($cleanField);
+                
+                $value = is_array($this->formData[$cleanField]) ? 
+                        implode(', ', $this->formData[$cleanField]) : 
+                        $this->formData[$cleanField];
+                
+                $body .= "\n<li><strong>" . $label . ':</strong> ' . $value . '</li>';
             }
         }
+    
         $body .= "\n</ul>";
-    }
-    // sprog installed and activated? 
-    if (rex_addon::get('sprog')->isAvailable()) {
-    $mail->Body = sprogdown($body, 1);
-    } 
-    else {
-    $mail->Body = $body;
-    }
-    return $mail->send();
-}
-
-private function getOrderedFormElements(): array
-{
-    $sortedFields = [];
-    $dom = new \DOMDocument();
-    @$dom->loadHTML(mb_convert_encoding($this->formHtml, 'HTML-ENTITIES', 'UTF-8'), 
-        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
     
-    $xpath = new \DOMXPath($dom);
-    $elements = $xpath->query('//input|//textarea|//select');
-    
-    foreach ($elements as $element) {
-        $name = $element->getAttribute('name');
-        if ($name) {
-            $cleanName = rtrim($name, '[]');
-            $sortedFields[] = $cleanName;
+        if (!empty($this->fileData)) {
+            $body .= "\n<h2>Datei-Anhänge:</h2>\n<ul>";
+            foreach ($this->fileData as $field => $files) {
+                // Felder mit data-dontsend überspringen
+                $cleanField = rtrim($field, '[]');
+                if (in_array($cleanField, $this->dontSendFields)) {
+                    continue;
+                }
+                
+                if (is_array($files)) {
+                    foreach ($files as $filePath) {
+                        if (file_exists($filePath)) {
+                            $mail->addAttachment($filePath);
+                            $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                                    ': ' . basename($filePath) . '</li>';
+                        }
+                    }
+                } else {
+                    if (file_exists($files)) {
+                        $mail->addAttachment($files);
+                        $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                                ': ' . basename($files) . '</li>';
+                    }
+                }
+            }
+            $body .= "\n</ul>";
         }
+        // sprog installed and activated? 
+        if (rex_addon::get('sprog')->isAvailable()) {
+        $mail->Body = sprogdown($body, 1);
+        } 
+        else {
+        $mail->Body = $body;
+        }
+        return $mail->send();
+    }
+
+    private function getOrderedFormElements(): array
+    {
+        $sortedFields = [];
+        $dom = new \DOMDocument();
+        @$dom->loadHTML(mb_convert_encoding($this->formHtml, 'HTML-ENTITIES', 'UTF-8'), 
+            LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        
+        $xpath = new \DOMXPath($dom);
+        $elements = $xpath->query('//input|//textarea|//select');
+        
+        foreach ($elements as $element) {
+            $name = $element->getAttribute('name');
+            if ($name) {
+                $cleanName = rtrim($name, '[]');
+                $sortedFields[] = $cleanName;
+            }
+        }
+        
+        return array_unique($sortedFields);
     }
     
-    return array_unique($sortedFields);
-}
     public function getProcessedFormData(): array
     {
         return $this->formData;
