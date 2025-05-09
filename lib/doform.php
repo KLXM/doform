@@ -2,10 +2,10 @@
 
 namespace klxm\doform;
 
-use rex_addon;
 use rex_formatter;
 use rex_mailer;
 use rex_path;
+use rex_addon;
 use IntlDateFormatter;
 
 class FormProcessor
@@ -17,6 +17,7 @@ class FormProcessor
     private array $fileData = [];
     private array $errors = [];
     private array $dontSendFields = []; // Array für Felder mit data-dontsend Attribut
+    private ?string $replyToFieldName = null; // Feldname für Reply-To E-Mail
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -44,6 +45,9 @@ class FormProcessor
         $this->parseForm();
     }
     
+    /**
+     * Felder mit data-dontsend Attribut identifizieren und speichern
+     */
     private function identifyDontSendFields(): void
     {
         $dom = new \DOMDocument('1.0', 'UTF-8');
@@ -61,105 +65,128 @@ class FormProcessor
         }
     }
 
+    /**
+     * E-Mail-Absender festlegen
+     */
     public function setEmailFrom(string $email): void
     {
         $this->emailFrom = $email;
     }
 
+    /**
+     * E-Mail-Empfänger festlegen
+     */
     public function setEmailTo(string $email): void
     {
         $this->emailTo = $email;
     }
 
+    /**
+     * E-Mail-Betreff festlegen
+     */
     public function setEmailSubject(string $subject): void
     {
         $this->emailSubject = $subject;
     }
+    
+    /**
+     * Feld für Reply-To E-Mail-Adresse festlegen
+     */
+    public function setReplyToField(string $fieldName): void
+    {
+        $this->replyToFieldName = $fieldName;
+    }
 
+    /**
+     * Formular parsen und Felder extrahieren
+     */
     private function parseForm(): void
-{
-    $dom = new \DOMDocument('1.0', 'UTF-8');
-    $dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-    $form = $dom->getElementsByTagName('form')->item(0);
+    {
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        $dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $form = $dom->getElementsByTagName('form')->item(0);
 
-    // Labels erfassen
-    $labels = [];
-    foreach ($form->getElementsByTagName('label') as $label) {
-        $for = $label->getAttribute('for');
-        if ($for) {
-            $labels[$for] = trim($label->textContent);
+        // Labels erfassen
+        $labels = [];
+        foreach ($form->getElementsByTagName('label') as $label) {
+            $for = $label->getAttribute('for');
+            if ($for) {
+                $labels[$for] = trim($label->textContent);
+            }
         }
-    }
 
-    // Inputs und andere Formularelemente sammeln
-    foreach ($form->getElementsByTagName('input') as $input) {
-        $name = $input->getAttribute('name');
-        $type = $input->getAttribute('type') ?: 'text';
-        $required = $input->hasAttribute('required');
-        
-        // Handle array inputs
-        $cleanName = rtrim($name, '[]');
-        $label = '';
-        
-        // Try to find label by input id first
-        $inputId = $input->getAttribute('id');
-        if ($inputId && isset($labels[$inputId])) {
-            $label = $labels[$inputId];
-        } 
-        // If no label found by id, try to find by clean name
-        elseif (isset($labels[$cleanName])) {
-            $label = $labels[$cleanName];
-        }
-        // Fallback to placeholder
-        else {
-            $label = $input->getAttribute('placeholder');
-        }
-        
-        $this->formFields[$name] = [
-            'type' => $type, 
-            'required' => $required, 
-            'label' => $label,
-            'isArray' => str_ends_with($name, '[]')
-        ];
-    }
-
-    foreach ($form->getElementsByTagName('select') as $select) {
-        $name = $select->getAttribute('name');
-        $cleanName = rtrim($name, '[]');
-        $multiple = $select->hasAttribute('multiple');
-        $required = $select->hasAttribute('required');
-        
-        $label = '';
-        if (isset($labels[$select->getAttribute('id')])) {
-            $label = $labels[$select->getAttribute('id')];
-        } elseif (isset($labels[$cleanName])) {
-            $label = $labels[$cleanName];
-        }
-        
-        $this->formFields[$name] = [
-            'type' => $multiple ? 'multiselect' : 'select',
-            'required' => $required,
-            'label' => $label,
-            'isArray' => str_ends_with($name, '[]')
-        ];
-    }
-
-    foreach ($form->getElementsByTagName('textarea') as $textarea) {
-        $name = $textarea->getAttribute('name');
-        $required = $textarea->hasAttribute('required');
-        $label = isset($labels[$textarea->getAttribute('id')]) 
-            ? $labels[$textarea->getAttribute('id')] 
-            : $textarea->getAttribute('placeholder');
+        // Inputs und andere Formularelemente sammeln
+        foreach ($form->getElementsByTagName('input') as $input) {
+            $name = $input->getAttribute('name');
+            $type = $input->getAttribute('type') ?: 'text';
+            $required = $input->hasAttribute('required');
             
-        $this->formFields[$name] = [
-            'type' => 'textarea',
-            'required' => $required,
-            'label' => $label,
-            'isArray' => false
-        ];
-    }
-}
+            // Handle array inputs
+            $cleanName = rtrim($name, '[]');
+            $label = '';
+            
+            // Try to find label by input id first
+            $inputId = $input->getAttribute('id');
+            if ($inputId && isset($labels[$inputId])) {
+                $label = $labels[$inputId];
+            } 
+            // If no label found by id, try to find by clean name
+            elseif (isset($labels[$cleanName])) {
+                $label = $labels[$cleanName];
+            }
+            // Fallback to placeholder
+            else {
+                $label = $input->getAttribute('placeholder');
+            }
+            
+            $this->formFields[$name] = [
+                'type' => $type, 
+                'required' => $required, 
+                'label' => $label,
+                'isArray' => str_ends_with($name, '[]')
+            ];
+        }
 
+        foreach ($form->getElementsByTagName('select') as $select) {
+            $name = $select->getAttribute('name');
+            $cleanName = rtrim($name, '[]');
+            $multiple = $select->hasAttribute('multiple');
+            $required = $select->hasAttribute('required');
+            
+            $label = '';
+            if (isset($labels[$select->getAttribute('id')])) {
+                $label = $labels[$select->getAttribute('id')];
+            } elseif (isset($labels[$cleanName])) {
+                $label = $labels[$cleanName];
+            }
+            
+            $this->formFields[$name] = [
+                'type' => $multiple ? 'multiselect' : 'select',
+                'required' => $required,
+                'label' => $label,
+                'isArray' => str_ends_with($name, '[]')
+            ];
+        }
+
+        foreach ($form->getElementsByTagName('textarea') as $textarea) {
+            $name = $textarea->getAttribute('name');
+            $required = $textarea->hasAttribute('required');
+            $label = isset($labels[$textarea->getAttribute('id')]) 
+                ? $labels[$textarea->getAttribute('id')] 
+                : $textarea->getAttribute('placeholder');
+                
+            $this->formFields[$name] = [
+                'type' => 'textarea',
+                'required' => $required,
+                'label' => $label,
+                'isArray' => false
+            ];
+        }
+    }
+
+    /**
+     * Formular anzeigen
+     */
     public function displayForm(): void
     {
         $dom = new \DOMDocument();
@@ -212,6 +239,9 @@ class FormProcessor
         echo $dom->saveHTML();
     }
 
+    /**
+     * Formular verarbeiten
+     */
     public function processForm(): ?bool
     {
         if ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST[$this->formId])) {
@@ -228,6 +258,9 @@ class FormProcessor
         return false;
     }
 
+    /**
+     * Formulardaten verarbeiten
+     */
     private function handleFormData(): void
     {
         foreach ($this->formFields as $field => $info) {
@@ -285,6 +318,9 @@ class FormProcessor
         }
     }
 
+    /**
+     * Datei-Uploads verarbeiten
+     */
     private function handleFileUploads(): void
     {
         foreach ($_FILES as $field => $fileInfo) {
@@ -303,6 +339,9 @@ class FormProcessor
         }
     }
 
+    /**
+     * Mehrere Dateien verarbeiten
+     */
     private function processMultipleFiles(string $field, array $fileInfo): void
     {
         $fileCount = count($fileInfo['name']);
@@ -325,6 +364,9 @@ class FormProcessor
         }
     }
 
+    /**
+     * Einzelne Datei verarbeiten
+     */
     private function processSingleFile(string $field, array $fileInfo, bool $isMultiple = false): ?string
     {
         $fileName = $fileInfo['name'];
@@ -350,6 +392,9 @@ class FormProcessor
         return null;
     }
 
+    /**
+     * E-Mail senden
+     */
     private function sendEmail(): bool
     {
         $mail = new rex_mailer();
@@ -358,6 +403,17 @@ class FormProcessor
         $mail->setFrom($this->emailFrom);
         $mail->addAddress($this->emailTo);
         $mail->Subject = $this->emailSubject;
+        
+        // Wenn ein Reply-To Feld definiert wurde und einen Wert hat
+        if ($this->replyToFieldName !== null && 
+            isset($this->formData[$this->replyToFieldName]) && 
+            !empty($this->formData[$this->replyToFieldName])) {
+            // Prüfen ob es eine gültige E-Mail-Adresse ist
+            $replyToEmail = $this->formData[$this->replyToFieldName];
+            if (filter_var($replyToEmail, FILTER_VALIDATE_EMAIL)) {
+                $mail->addReplyTo($replyToEmail);
+            }
+        }
     
         $elements = $this->getOrderedFormElements();
         $body = '<h1>' . $this->emailSubject . "</h1>\n<ul>";
@@ -413,14 +469,17 @@ class FormProcessor
         }
         // sprog installed and activated? 
         if (rex_addon::get('sprog')->isAvailable()) {
-        $mail->Body = sprogdown($body, 1);
+            $mail->Body = sprogdown($body, 1);
         } 
         else {
-        $mail->Body = $body;
+            $mail->Body = $body;
         }
         return $mail->send();
     }
 
+    /**
+     * Geordnete Formularelemente zurückgeben
+     */
     private function getOrderedFormElements(): array
     {
         $sortedFields = [];
@@ -442,16 +501,25 @@ class FormProcessor
         return array_unique($sortedFields);
     }
     
+    /**
+     * Verarbeitete Formulardaten zurückgeben
+     */
     public function getProcessedFormData(): array
     {
         return $this->formData;
     }
 
+    /**
+     * Hochgeladene Dateien zurückgeben
+     */
     public function getUploadedFiles(): array
     {
         return $this->fileData;
     }
 
+    /**
+     * Fehler anzeigen
+     */
     public function displayErrors(): void
     {
         if (!empty($this->errors)) {
@@ -463,6 +531,9 @@ class FormProcessor
         }
     }
 
+    /**
+     * Formular-HTML zurückgeben
+     */
     public function getFormHtml(): string
     {
         return $this->formHtml;
