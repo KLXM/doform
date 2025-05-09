@@ -2,6 +2,7 @@
 
 namespace klxm\doform;
 
+use rex_addon
 use rex_formatter;
 use rex_mailer;
 use rex_path;
