@@ -122,7 +122,10 @@ class FormProcessor
         // 3. Umschließendes Label (wenn Input im Label verschachtelt ist)
         $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
         if ($parentLabel) {
-            return trim($parentLabel->textContent);
+            $labelText = trim($parentLabel->textContent);
+            if (!empty($labelText)) {
+                return $labelText;
+            }
         }
         
         // 4. Fieldset/Legend für Radio-Gruppen
