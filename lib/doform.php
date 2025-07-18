@@ -161,8 +161,11 @@ class FormProcessor
             return $this->radioGroups[$radioName];
         }
         
+        // Escape the radioName to prevent XPath injection
+        $escapedRadioName = $this->escapeForXPath($radioName);
+        
         // Suche nach einem Radio-Button dieser Gruppe mit data-grouplabel Attribut
-        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name='$radioName'][@data-grouplabel]")->item(0);
+        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name='$escapedRadioName'][@data-grouplabel]")->item(0);
         if ($radioWithGroupLabel) {
             $groupLabel = $radioWithGroupLabel->getAttribute('data-grouplabel');
             $this->radioGroups[$radioName] = $groupLabel;
