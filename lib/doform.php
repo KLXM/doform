@@ -134,7 +134,10 @@ class FormProcessor
             if ($fieldset) {
                 $legend = $xpath->query('legend[1]', $fieldset)->item(0);
                 if ($legend) {
-                    return trim($legend->textContent);
+                    $legendText = trim($legend->textContent);
+                    if (!empty($legendText)) {
+                        return $legendText;
+                    }
                 }
             }
         }
