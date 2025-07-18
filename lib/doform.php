@@ -16,8 +16,9 @@ class FormProcessor
     private array $formData = [];
     private array $fileData = [];
     private array $errors = [];
-    private array $dontSendFields = []; // Array für Felder mit data-dontsend Attribut
-    private ?string $replyToFieldName = null; // Feldname für Reply-To E-Mail
+    private array $dontSendFields = [];
+    private ?string $replyToFieldName = null;
+    private array $radioGroups = []; // Neue Eigenschaft für Radio-Gruppen
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -39,9 +40,7 @@ class FormProcessor
         $this->maxFileSize = $maxFileSize;
         $this->uploadDir = rex_path::base($uploadDir);
         
-        // Felder mit data-dontsend identifizieren
         $this->identifyDontSendFields();
-        
         $this->parseForm();
     }
     
@@ -98,6 +97,82 @@ class FormProcessor
     }
 
     /**
+     * Verbesserte Label-Erkennung für alle Formularelemente
+     */
+    private function findElementLabel(\DOMElement $element, array $labels, \DOMXPath $xpath): string
+    {
+        $name = $element->getAttribute('name');
+        $id = $element->getAttribute('id');
+        $type = $element->getAttribute('type');
+        $cleanName = rtrim($name, '[]');
+        
+        // 1. Prüfung auf data-grouplabel Attribut (für Radio-Gruppen)
+        if ($type === 'radio') {
+            $groupLabel = $this->findRadioGroupLabel($name, $xpath);
+            if ($groupLabel) {
+                return $groupLabel;
+            }
+        }
+        
+        // 2. Label über for-Attribut (klassischer Fall)
+        if ($id && isset($labels[$id])) {
+            return $labels[$id];
+        }
+        
+        // 3. Umschließendes Label (wenn Input im Label verschachtelt ist)
+        $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
+        if ($parentLabel) {
+            return trim($parentLabel->textContent);
+        }
+        
+        // 4. Fieldset/Legend für Radio-Gruppen
+        if ($type === 'radio') {
+            $fieldset = $xpath->query('ancestor::fieldset[1]', $element)->item(0);
+            if ($fieldset) {
+                $legend = $xpath->query('legend[1]', $fieldset)->item(0);
+                if ($legend) {
+                    return trim($legend->textContent);
+                }
+            }
+        }
+        
+        // 5. Fallback auf Label über clean name
+        if (isset($labels[$cleanName])) {
+            return $labels[$cleanName];
+        }
+        
+        // 6. Fallback auf placeholder
+        $placeholder = $element->getAttribute('placeholder');
+        if ($placeholder) {
+            return $placeholder;
+        }
+        
+        // 7. Letzter Fallback: Name selbst
+        return ucfirst($cleanName);
+    }
+    
+    /**
+     * Radio-Gruppe Label über data-grouplabel Attribut finden
+     */
+    private function findRadioGroupLabel(string $radioName, \DOMXPath $xpath): ?string
+    {
+        // Prüfe ob bereits ein Gruppen-Label für diese Radio-Gruppe gefunden wurde
+        if (isset($this->radioGroups[$radioName])) {
+            return $this->radioGroups[$radioName];
+        }
+        
+        // Suche nach einem Radio-Button dieser Gruppe mit data-grouplabel Attribut
+        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name='$radioName'][@data-grouplabel]")->item(0);
+        if ($radioWithGroupLabel) {
+            $groupLabel = $radioWithGroupLabel->getAttribute('data-grouplabel');
+            $this->radioGroups[$radioName] = $groupLabel;
+            return $groupLabel;
+        }
+        
+        return null;
+    }
+
+    /**
      * Formular parsen und Felder extrahieren
      */
     private function parseForm(): void
@@ -105,8 +180,9 @@ class FormProcessor
         $dom = new \DOMDocument('1.0', 'UTF-8');
         $dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         $form = $dom->getElementsByTagName('form')->item(0);
+        $xpath = new \DOMXPath($dom);
 
-        // Labels erfassen
+        // Labels mit for-Attribut erfassen
         $labels = [];
         foreach ($form->getElementsByTagName('label') as $label) {
             $for = $label->getAttribute('for');
@@ -115,29 +191,14 @@ class FormProcessor
             }
         }
 
-        // Inputs und andere Formularelemente sammeln
+        // Input-Elemente verarbeiten
         foreach ($form->getElementsByTagName('input') as $input) {
             $name = $input->getAttribute('name');
             $type = $input->getAttribute('type') ?: 'text';
             $required = $input->hasAttribute('required');
-            
-            // Handle array inputs
             $cleanName = rtrim($name, '[]');
-            $label = '';
             
-            // Try to find label by input id first
-            $inputId = $input->getAttribute('id');
-            if ($inputId && isset($labels[$inputId])) {
-                $label = $labels[$inputId];
-            } 
-            // If no label found by id, try to find by clean name
-            elseif (isset($labels[$cleanName])) {
-                $label = $labels[$cleanName];
-            }
-            // Fallback to placeholder
-            else {
-                $label = $input->getAttribute('placeholder');
-            }
+            $label = $this->findElementLabel($input, $labels, $xpath);
             
             $this->formFields[$name] = [
                 'type' => $type, 
@@ -147,18 +208,14 @@ class FormProcessor
             ];
         }
 
+        // Select-Elemente verarbeiten
         foreach ($form->getElementsByTagName('select') as $select) {
             $name = $select->getAttribute('name');
             $cleanName = rtrim($name, '[]');
             $multiple = $select->hasAttribute('multiple');
             $required = $select->hasAttribute('required');
             
-            $label = '';
-            if (isset($labels[$select->getAttribute('id')])) {
-                $label = $labels[$select->getAttribute('id')];
-            } elseif (isset($labels[$cleanName])) {
-                $label = $labels[$cleanName];
-            }
+            $label = $this->findElementLabel($select, $labels, $xpath);
             
             $this->formFields[$name] = [
                 'type' => $multiple ? 'multiselect' : 'select',
@@ -168,12 +225,12 @@ class FormProcessor
             ];
         }
 
+        // Textarea-Elemente verarbeiten
         foreach ($form->getElementsByTagName('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
             $required = $textarea->hasAttribute('required');
-            $label = isset($labels[$textarea->getAttribute('id')]) 
-                ? $labels[$textarea->getAttribute('id')] 
-                : $textarea->getAttribute('placeholder');
+            
+            $label = $this->findElementLabel($textarea, $labels, $xpath);
                 
             $this->formFields[$name] = [
                 'type' => 'textarea',
@@ -393,7 +450,7 @@ class FormProcessor
     }
 
     /**
-     * E-Mail senden
+     * E-Mail senden mit verbesserter Label-Behandlung
      */
     private function sendEmail(): bool
     {
@@ -408,7 +465,6 @@ class FormProcessor
         if ($this->replyToFieldName !== null && 
             isset($this->formData[$this->replyToFieldName]) && 
             !empty($this->formData[$this->replyToFieldName])) {
-            // Prüfen ob es eine gültige E-Mail-Adresse ist
             $replyToEmail = $this->formData[$this->replyToFieldName];
             if (filter_var($replyToEmail, FILTER_VALIDATE_EMAIL)) {
                 $mail->addReplyTo($replyToEmail);
@@ -418,17 +474,27 @@ class FormProcessor
         $elements = $this->getOrderedFormElements();
         $body = '<h1>' . $this->emailSubject . "</h1>\n<ul>";
         
+        $processedRadioGroups = []; // Tracking für bereits verarbeitete Radio-Gruppen
+        
         foreach ($elements as $field) {
-            // Felder mit data-dontsend überspringen
             $cleanField = rtrim($field, '[]');
+            
+            // Felder mit data-dontsend überspringen
             if (in_array($cleanField, $this->dontSendFields)) {
                 continue;
             }
             
+            // Für Radio-Buttons: Prüfen ob Gruppe bereits verarbeitet wurde
+            $fieldInfo = $this->getFieldInfo($field);
+            if ($fieldInfo && $fieldInfo['type'] === 'radio') {
+                if (in_array($cleanField, $processedRadioGroups)) {
+                    continue; // Diese Radio-Gruppe wurde bereits verarbeitet
+                }
+                $processedRadioGroups[] = $cleanField;
+            }
+            
             if (isset($this->formData[$cleanField]) && !empty($this->formData[$cleanField])) {
-                $label = !empty($this->formFields[$field]['label']) ? 
-                        $this->formFields[$field]['label'] : 
-                        ucfirst($cleanField);
+                $label = $this->getFieldLabel($field);
                 
                 $value = is_array($this->formData[$cleanField]) ? 
                         implode(', ', $this->formData[$cleanField]) : 
@@ -443,7 +509,6 @@ class FormProcessor
         if (!empty($this->fileData)) {
             $body .= "\n<h2>Datei-Anhänge:</h2>\n<ul>";
             foreach ($this->fileData as $field => $files) {
-                // Felder mit data-dontsend überspringen
                 $cleanField = rtrim($field, '[]');
                 if (in_array($cleanField, $this->dontSendFields)) {
                     continue;
@@ -453,32 +518,54 @@ class FormProcessor
                     foreach ($files as $filePath) {
                         if (file_exists($filePath)) {
                             $mail->addAttachment($filePath);
-                            $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                            $body .= "\n<li>" . $this->getFieldLabel($field) . 
                                     ': ' . basename($filePath) . '</li>';
                         }
                     }
                 } else {
                     if (file_exists($files)) {
                         $mail->addAttachment($files);
-                        $body .= "\n<li>" . ($this->formFields[$field]['label'] ?? ucfirst($field)) . 
+                        $body .= "\n<li>" . $this->getFieldLabel($field) . 
                                 ': ' . basename($files) . '</li>';
                     }
                 }
             }
             $body .= "\n</ul>";
         }
-        // sprog installed and activated? 
+        
         if (rex_addon::get('sprog')->isAvailable()) {
             $mail->Body = sprogdown($body, 1);
-        } 
-        else {
+        } else {
             $mail->Body = $body;
         }
+        
         return $mail->send();
+    }
+    
+    /**
+     * Hilfsmethode: Feld-Info abrufen
+     */
+    private function getFieldInfo(string $field): ?array
+    {
+        return $this->formFields[$field] ?? null;
+    }
+    
+    /**
+     * Hilfsmethode: Label für Feld abrufen
+     */
+    private function getFieldLabel(string $field): string
+    {
+        $fieldInfo = $this->getFieldInfo($field);
+        if ($fieldInfo && !empty($fieldInfo['label'])) {
+            return $fieldInfo['label'];
+        }
+        
+        $cleanField = rtrim($field, '[]');
+        return ucfirst($cleanField);
     }
 
     /**
-     * Geordnete Formularelemente zurückgeben
+     * Geordnete Formularelemente zurückgeben (verbessert für Duplikate)
      */
     private function getOrderedFormElements(): array
     {
@@ -494,7 +581,14 @@ class FormProcessor
             $name = $element->getAttribute('name');
             if ($name) {
                 $cleanName = rtrim($name, '[]');
-                $sortedFields[] = $cleanName;
+                // Für Radio-Buttons: Nur einmal zur Liste hinzufügen
+                if ($element->getAttribute('type') === 'radio') {
+                    if (!in_array($cleanName, $sortedFields)) {
+                        $sortedFields[] = $cleanName;
+                    }
+                } else {
+                    $sortedFields[] = $cleanName;
+                }
             }
         }
         
