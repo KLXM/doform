@@ -18,7 +18,8 @@ class FormProcessor
     private array $errors = [];
     private array $dontSendFields = [];
     private ?string $replyToFieldName = null;
-    private array $radioGroups = []; // Neue Eigenschaft für Radio-Gruppen
+    private array $radioGroups = [];
+    private array $uniqueFields = []; // Speichert eindeutige Felder zur Vermeidung von Duplikaten
 
     private string $uploadDir;
     private array $allowedExtensions;
@@ -97,6 +98,23 @@ class FormProcessor
     }
 
     /**
+     * XPath-sichere Escapierung
+     */
+    private function escapeForXPath(string $value): string
+    {
+        if (strpos($value, "'") === false) {
+            return "'" . $value . "'";
+        }
+        
+        if (strpos($value, '"') === false) {
+            return '"' . $value . '"';
+        }
+        
+        // Für komplexere Fälle mit beiden Anführungszeichen
+        return "concat('" . str_replace("'", "', \"'\", '", $value) . "')";
+    }
+
+    /**
      * Verbesserte Label-Erkennung für alle Formularelemente
      */
     private function findElementLabel(\DOMElement $element, array $labels, \DOMXPath $xpath): string
@@ -122,7 +140,8 @@ class FormProcessor
         // 3. Umschließendes Label (wenn Input im Label verschachtelt ist)
         $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
         if ($parentLabel) {
-            $labelText = trim($parentLabel->textContent);
+            // Extrahiere nur den direkten Text-Inhalt des Labels, nicht der Kind-Elemente
+            $labelText = $this->extractLabelText($parentLabel, $element);
             if (!empty($labelText)) {
                 return $labelText;
             }
@@ -149,12 +168,31 @@ class FormProcessor
         
         // 6. Fallback auf placeholder
         $placeholder = $element->getAttribute('placeholder');
-        if ($placeholder) {
+        if (!empty($placeholder)) {
             return $placeholder;
         }
         
         // 7. Letzter Fallback: Name selbst
         return ucfirst($cleanName);
+    }
+    
+    /**
+     * Extrahiert Text aus Label ohne Kind-Elemente
+     */
+    private function extractLabelText(\DOMElement $label, \DOMElement $targetElement): string
+    {
+        $text = '';
+        
+        foreach ($label->childNodes as $child) {
+            if ($child->nodeType === XML_TEXT_NODE) {
+                $text .= $child->textContent;
+            } elseif ($child->nodeType === XML_ELEMENT_NODE && $child !== $targetElement) {
+                // Füge Text von anderen Elementen hinzu (außer dem Ziel-Input)
+                $text .= $child->textContent;
+            }
+        }
+        
+        return trim($text);
     }
     
     /**
@@ -171,7 +209,7 @@ class FormProcessor
         $escapedRadioName = $this->escapeForXPath($radioName);
         
         // Suche nach einem Radio-Button dieser Gruppe mit data-grouplabel Attribut
-        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name='$escapedRadioName'][@data-grouplabel]")->item(0);
+        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name=$escapedRadioName][@data-grouplabel]")->item(0);
         if ($radioWithGroupLabel) {
             $groupLabel = $radioWithGroupLabel->getAttribute('data-grouplabel');
             $this->radioGroups[$radioName] = $groupLabel;
@@ -182,13 +220,25 @@ class FormProcessor
     }
 
     /**
-     * Formular parsen und Felder extrahieren
+     * Formular parsen und Felder extrahieren (verbessert)
      */
     private function parseForm(): void
     {
         $dom = new \DOMDocument('1.0', 'UTF-8');
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        
+        // Verbessertes HTML-Loading mit UTF-8 Handling
+        $html = $this->formHtml;
+        if (!mb_check_encoding($html, 'UTF-8')) {
+            $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
+        }
+        
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         $form = $dom->getElementsByTagName('form')->item(0);
+        
+        if (!$form) {
+            return; // Kein Form gefunden
+        }
+        
         $xpath = new \DOMXPath($dom);
 
         // Labels mit for-Attribut erfassen
@@ -203,51 +253,87 @@ class FormProcessor
         // Input-Elemente verarbeiten
         foreach ($form->getElementsByTagName('input') as $input) {
             $name = $input->getAttribute('name');
+            if (empty($name)) continue;
+            
             $type = $input->getAttribute('type') ?: 'text';
             $required = $input->hasAttribute('required');
             $cleanName = rtrim($name, '[]');
             
+            // Für Radio-Buttons: Nur einmal pro Gruppe speichern
+            if ($type === 'radio' && isset($this->uniqueFields[$cleanName])) {
+                continue;
+            }
+            
             $label = $this->findElementLabel($input, $labels, $xpath);
             
-            $this->formFields[$name] = [
+            $this->formFields[$cleanName] = [
                 'type' => $type, 
                 'required' => $required, 
                 'label' => $label,
-                'isArray' => str_ends_with($name, '[]')
+                'isArray' => str_ends_with($name, '[]'),
+                'originalName' => $name
             ];
+            
+            $this->uniqueFields[$cleanName] = true;
         }
 
         // Select-Elemente verarbeiten
         foreach ($form->getElementsByTagName('select') as $select) {
             $name = $select->getAttribute('name');
+            if (empty($name)) continue;
+            
             $cleanName = rtrim($name, '[]');
             $multiple = $select->hasAttribute('multiple');
             $required = $select->hasAttribute('required');
             
             $label = $this->findElementLabel($select, $labels, $xpath);
             
-            $this->formFields[$name] = [
+            $this->formFields[$cleanName] = [
                 'type' => $multiple ? 'multiselect' : 'select',
                 'required' => $required,
                 'label' => $label,
-                'isArray' => str_ends_with($name, '[]')
+                'isArray' => str_ends_with($name, '[]'),
+                'originalName' => $name,
+                'options' => $this->extractSelectOptions($select)
             ];
+            
+            $this->uniqueFields[$cleanName] = true;
         }
 
         // Textarea-Elemente verarbeiten
         foreach ($form->getElementsByTagName('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
+            if (empty($name)) continue;
+            
+            $cleanName = rtrim($name, '[]');
             $required = $textarea->hasAttribute('required');
             
             $label = $this->findElementLabel($textarea, $labels, $xpath);
                 
-            $this->formFields[$name] = [
+            $this->formFields[$cleanName] = [
                 'type' => 'textarea',
                 'required' => $required,
                 'label' => $label,
-                'isArray' => false
+                'isArray' => false,
+                'originalName' => $name
             ];
+            
+            $this->uniqueFields[$cleanName] = true;
         }
+    }
+    
+    /**
+     * Select-Optionen extrahieren für bessere Wert-Anzeige
+     */
+    private function extractSelectOptions(\DOMElement $select): array
+    {
+        $options = [];
+        foreach ($select->getElementsByTagName('option') as $option) {
+            $value = $option->getAttribute('value');
+            $text = trim($option->textContent);
+            $options[$value] = $text;
+        }
+        return $options;
     }
 
     /**
@@ -255,9 +341,21 @@ class FormProcessor
      */
     public function displayForm(): void
     {
-        $dom = new \DOMDocument();
-        @$dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        
+        // Verbessertes HTML-Loading
+        $html = $this->formHtml;
+        if (!mb_check_encoding($html, 'UTF-8')) {
+            $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
+        }
+        
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         $form = $dom->getElementsByTagName('form')->item(0);
+        
+        if (!$form) {
+            echo $this->formHtml;
+            return;
+        }
         
         // Add a hidden input for the form ID
         $hiddenInput = $dom->createElement('input');
@@ -273,20 +371,34 @@ class FormProcessor
             $type = $input->getAttribute('type');
 
             if (isset($this->formData[$cleanField])) {
-                if ($type === 'checkbox' || $type === 'radio') {
+                if ($type === 'checkbox') {
+                    // Checkbox-Array Handling
+                    if (str_ends_with($name, '[]')) {
+                        $inputValue = $input->getAttribute('value');
+                        if (is_array($this->formData[$cleanField]) && in_array($inputValue, $this->formData[$cleanField])) {
+                            $input->setAttribute('checked', 'checked');
+                        }
+                    } else {
+                        // Einzelne Checkbox
+                        if ($this->formData[$cleanField] === 'Ja' || $this->formData[$cleanField] === true) {
+                            $input->setAttribute('checked', 'checked');
+                        }
+                    }
+                } elseif ($type === 'radio') {
                     if ($input->getAttribute('value') === $this->formData[$cleanField]) {
                         $input->setAttribute('checked', 'checked');
                     }
                 } else {
-                    $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField]));
+                    $input->setAttribute('value', htmlspecialchars($this->formData[$cleanField] ?? ''));
                 }
             }
         }
 
         foreach ($dom->getElementsByTagName('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
-            if (isset($this->formData[$name])) {
-                $textarea->nodeValue = htmlspecialchars($this->formData[$name]);
+            $cleanField = rtrim($name, '[]');
+            if (isset($this->formData[$cleanField])) {
+                $textarea->nodeValue = htmlspecialchars($this->formData[$cleanField]);
             }
         }
 
@@ -294,8 +406,11 @@ class FormProcessor
             $name = $select->getAttribute('name');
             $cleanField = rtrim($name, '[]');
             if (isset($this->formData[$cleanField])) {
+                $selectedValues = is_array($this->formData[$cleanField]) ? 
+                    $this->formData[$cleanField] : [$this->formData[$cleanField]];
+                
                 foreach ($select->getElementsByTagName('option') as $option) {
-                    if ($option->getAttribute('value') == $this->formData[$cleanField]) {
+                    if (in_array($option->getAttribute('value'), $selectedValues)) {
                         $option->setAttribute('selected', 'selected');
                     }
                 }
@@ -325,67 +440,107 @@ class FormProcessor
     }
 
     /**
-     * Formulardaten verarbeiten
+     * Formulardaten verarbeiten (verbessert für Arrays)
      */
     private function handleFormData(): void
     {
-        foreach ($this->formFields as $field => $info) {
-            $cleanField = rtrim($field, '[]');
+        foreach ($this->formFields as $cleanField => $info) {
             $fieldType = $info['type'];
+            $isArray = $info['isArray'];
 
             switch ($fieldType) {
                 case 'multiselect':
                     $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
-                    if (!empty($this->formData[$cleanField])) {
-                        $this->formData[$cleanField] = implode(', ', $this->formData[$cleanField]);
-                    } else {
-                        $this->formData[$cleanField] = null;
-                    }
                     break;
 
                 case 'select':
+                    if ($isArray) {
+                        $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                    } else {
+                        $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    }
+                    break;
+
                 case 'radio':
                     $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
                     break;
 
                 case 'checkbox':
-                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
+                    if ($isArray) {
+                        // Checkbox-Array: Sammle alle gewählten Werte
+                        $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                    } else {
+                        // Einzelne Checkbox: Ja/Nein
+                        $this->formData[$cleanField] = rex_post($cleanField, 'string', null) ? 'Ja' : 'Nein';
+                    }
                     break;
 
                 case 'date':
                     $dateValue = rex_post($cleanField, 'string', null);
                     if (!empty($dateValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlDate(strtotime($dateValue), IntlDateFormatter::MEDIUM);
+                        $timestamp = strtotime($dateValue);
+                        if ($timestamp !== false) {
+                            $this->formData[$cleanField] = rex_formatter::intlDate($timestamp, IntlDateFormatter::MEDIUM);
+                        }
+                    } else {
+                        $this->formData[$cleanField] = null;
                     }
                     break;
 
                 case 'time':
                     $timeValue = rex_post($cleanField, 'string', null);
                     if (!empty($timeValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlTime(strtotime($timeValue), IntlDateFormatter::SHORT);
+                        $timestamp = strtotime($timeValue);
+                        if ($timestamp !== false) {
+                            $this->formData[$cleanField] = rex_formatter::intlTime($timestamp, IntlDateFormatter::SHORT);
+                        }
+                    } else {
+                        $this->formData[$cleanField] = null;
                     }
                     break;
 
                 case 'datetime-local':
                     $dateTimeValue = rex_post($cleanField, 'string', null);
                     if (!empty($dateTimeValue)) {
-                        $this->formData[$cleanField] = rex_formatter::intlDateTime(strtotime($dateTimeValue), [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
+                        $timestamp = strtotime($dateTimeValue);
+                        if ($timestamp !== false) {
+                            $this->formData[$cleanField] = rex_formatter::intlDateTime($timestamp, [IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT]);
+                        }
+                    } else {
+                        $this->formData[$cleanField] = null;
                     }
                     break;
 
                 default:
-                    $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    if ($isArray) {
+                        $this->formData[$cleanField] = rex_post($cleanField, 'array', []);
+                    } else {
+                        $this->formData[$cleanField] = rex_post($cleanField, 'string', null);
+                    }
                     break;
             }
 
-            if ($info['required'] && empty($this->formData[$cleanField])) {
-                $this->errors[] = ucfirst($cleanField) . " ist ein Pflichtfeld.";
+            // Validierung für Pflichtfelder
+            if ($info['required']) {
+                $isEmpty = false;
+                if (is_array($this->formData[$cleanField])) {
+                    $isEmpty = empty(array_filter($this->formData[$cleanField], function($val) {
+                        return !empty($val);
+                    }));
+                } else {
+                    $isEmpty = empty($this->formData[$cleanField]) || $this->formData[$cleanField] === 'Nein';
+                }
+                
+                if ($isEmpty) {
+                    $label = $info['label'] ?? ucfirst($cleanField);
+                    $this->errors[] = $label . " ist ein Pflichtfeld.";
+                }
             }
         }
     }
 
     /**
-     * Datei-Uploads verarbeiten
+     * Datei-Uploads verarbeiten (verbesserte Fehlerbehandlung)
      */
     private function handleFileUploads(): void
     {
@@ -397,9 +552,8 @@ class FormProcessor
                     $uploadPath = $this->processSingleFile($field, $fileInfo);
                     if ($uploadPath) {
                         $this->fileData[$field] = $uploadPath;
-                    } else {
-                        $this->errors[] = "Fehler beim Hochladen der Datei: " . htmlspecialchars($fileInfo['name']);
                     }
+                    // Fehler werden bereits in processSingleFile() hinzugefügt
                 }
             }
         }
@@ -431,7 +585,7 @@ class FormProcessor
     }
 
     /**
-     * Einzelne Datei verarbeiten
+     * Einzelne Datei verarbeiten (verbesserte Fehlerbehandlung)
      */
     private function processSingleFile(string $field, array $fileInfo, bool $isMultiple = false): ?string
     {
@@ -439,27 +593,69 @@ class FormProcessor
         $fileTmp = $fileInfo['tmp_name'];
         $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
         $fileSize = $fileInfo['size'];
+        $error = $fileInfo['error'];
+        
+        // Upload-Fehler prüfen
+        if ($error !== UPLOAD_ERR_OK) {
+            $this->addUploadError($field, $fileName, $error);
+            return null;
+        }
 
         if (!in_array($fileExt, $this->allowedExtensions)) {
-            $this->errors[] = "Ungültiges Dateiformat für " . ucfirst($field) . ". Erlaubte Formate: " . implode(', ', $this->allowedExtensions);
-        } elseif ($fileSize > $this->maxFileSize) {
-            $this->errors[] = ucfirst($field) . " ist zu groß. Maximale Dateigröße: " . ($this->maxFileSize / 1024 / 1024) . " MB.";
-        } elseif ($fileInfo['error'] === 0) {
-            $newFileName = uniqid() . '.' . $fileExt;
-            $uploadPath = $this->uploadDir . $newFileName;
+            $fieldLabel = $this->getFieldLabel($field);
+            $this->errors[] = "Ungültiges Dateiformat für {$fieldLabel}. Erlaubte Formate: " . implode(', ', $this->allowedExtensions);
+            return null;
+        }
+        
+        if ($fileSize > $this->maxFileSize) {
+            $fieldLabel = $this->getFieldLabel($field);
+            $maxSizeMB = round($this->maxFileSize / 1024 / 1024, 1);
+            $this->errors[] = "{$fieldLabel} ist zu groß. Maximale Dateigröße: {$maxSizeMB} MB.";
+            return null;
+        }
 
-            if (move_uploaded_file($fileTmp, $uploadPath)) {
-                return $uploadPath;
-            } else {
-                $this->errors[] = "Fehler beim Hochladen von " . ucfirst($field) . ". Temp-Datei: " . $fileTmp;
+        // Eindeutigen Dateinamen erstellen
+        $newFileName = uniqid('upload_', true) . '.' . $fileExt;
+        $uploadPath = $this->uploadDir . $newFileName;
+
+        // Verzeichnis erstellen falls nicht vorhanden
+        if (!is_dir($this->uploadDir)) {
+            if (!mkdir($this->uploadDir, 0755, true)) {
+                $this->errors[] = "Upload-Verzeichnis konnte nicht erstellt werden.";
+                return null;
             }
         }
 
-        return null;
+        if (move_uploaded_file($fileTmp, $uploadPath)) {
+            return $uploadPath;
+        } else {
+            $fieldLabel = $this->getFieldLabel($field);
+            $this->errors[] = "Fehler beim Speichern der Datei für {$fieldLabel}.";
+            return null;
+        }
+    }
+    
+    /**
+     * Upload-Fehler spezifisch behandeln
+     */
+    private function addUploadError(string $field, string $fileName, int $error): void
+    {
+        $fieldLabel = $this->getFieldLabel($field);
+        $errorMsg = match($error) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => "Datei '{$fileName}' für {$fieldLabel} ist zu groß.",
+            UPLOAD_ERR_PARTIAL => "Datei '{$fileName}' für {$fieldLabel} wurde nur teilweise hochgeladen.",
+            UPLOAD_ERR_NO_FILE => "Keine Datei für {$fieldLabel} ausgewählt.",
+            UPLOAD_ERR_NO_TMP_DIR => "Temporäres Verzeichnis für Upload fehlt.",
+            UPLOAD_ERR_CANT_WRITE => "Datei '{$fileName}' konnte nicht gespeichert werden.",
+            UPLOAD_ERR_EXTENSION => "Upload von '{$fileName}' wurde durch eine PHP-Erweiterung blockiert.",
+            default => "Unbekannter Fehler beim Hochladen von '{$fileName}' für {$fieldLabel}."
+        };
+        
+        $this->errors[] = $errorMsg;
     }
 
     /**
-     * E-Mail senden mit verbesserter Label-Behandlung
+     * E-Mail senden mit verbesserter Wert-Anzeige
      */
     private function sendEmail(): bool
     {
@@ -481,35 +677,21 @@ class FormProcessor
         }
     
         $elements = $this->getOrderedFormElements();
-        $body = '<h1>' . $this->emailSubject . "</h1>\n<ul>";
+        $body = '<h1>' . htmlspecialchars($this->emailSubject) . "</h1>\n<ul>";
         
-        $processedRadioGroups = []; // Tracking für bereits verarbeitete Radio-Gruppen
-        
-        foreach ($elements as $field) {
-            $cleanField = rtrim($field, '[]');
-            
+        foreach ($elements as $cleanField) {
             // Felder mit data-dontsend überspringen
             if (in_array($cleanField, $this->dontSendFields)) {
                 continue;
             }
             
-            // Für Radio-Buttons: Prüfen ob Gruppe bereits verarbeitet wurde
-            $fieldInfo = $this->getFieldInfo($field);
-            if ($fieldInfo && $fieldInfo['type'] === 'radio') {
-                if (in_array($cleanField, $processedRadioGroups)) {
-                    continue; // Diese Radio-Gruppe wurde bereits verarbeitet
-                }
-                $processedRadioGroups[] = $cleanField;
-            }
-            
             if (isset($this->formData[$cleanField]) && !empty($this->formData[$cleanField])) {
-                $label = $this->getFieldLabel($field);
+                $label = $this->getFieldLabel($cleanField);
+                $value = $this->formatFieldValue($cleanField, $this->formData[$cleanField]);
                 
-                $value = is_array($this->formData[$cleanField]) ? 
-                        implode(', ', $this->formData[$cleanField]) : 
-                        $this->formData[$cleanField];
-                
-                $body .= "\n<li><strong>" . $label . ':</strong> ' . $value . '</li>';
+                if (!empty($value)) {
+                    $body .= "\n<li><strong>" . htmlspecialchars($label) . ':</strong> ' . htmlspecialchars($value) . '</li>';
+                }
             }
         }
     
@@ -527,15 +709,15 @@ class FormProcessor
                     foreach ($files as $filePath) {
                         if (file_exists($filePath)) {
                             $mail->addAttachment($filePath);
-                            $body .= "\n<li>" . $this->getFieldLabel($field) . 
-                                    ': ' . basename($filePath) . '</li>';
+                            $body .= "\n<li>" . htmlspecialchars($this->getFieldLabel($field)) . 
+                                    ': ' . htmlspecialchars(basename($filePath)) . '</li>';
                         }
                     }
                 } else {
                     if (file_exists($files)) {
                         $mail->addAttachment($files);
-                        $body .= "\n<li>" . $this->getFieldLabel($field) . 
-                                ': ' . basename($files) . '</li>';
+                        $body .= "\n<li>" . htmlspecialchars($this->getFieldLabel($field)) . 
+                                ': ' . htmlspecialchars(basename($files)) . '</li>';
                     }
                 }
             }
@@ -552,11 +734,37 @@ class FormProcessor
     }
     
     /**
+     * Formatiert Feldwerte für die E-Mail-Anzeige
+     */
+    private function formatFieldValue(string $cleanField, $value): string
+    {
+        if (is_array($value)) {
+            // Für Arrays: Leere Werte filtern und mit Komma verbinden
+            $filteredValues = array_filter($value, function($val) {
+                return !empty($val);
+            });
+            return implode(', ', $filteredValues);
+        }
+        
+        // Für Select-Felder: Versuche den Anzeige-Text der Option zu finden
+        $fieldInfo = $this->formFields[$cleanField] ?? null;
+        if ($fieldInfo && ($fieldInfo['type'] === 'select' || $fieldInfo['type'] === 'multiselect')) {
+            $options = $fieldInfo['options'] ?? [];
+            if (isset($options[$value]) && !empty($options[$value])) {
+                return $options[$value];
+            }
+        }
+        
+        return (string) $value;
+    }
+    
+    /**
      * Hilfsmethode: Feld-Info abrufen
      */
     private function getFieldInfo(string $field): ?array
     {
-        return $this->formFields[$field] ?? null;
+        $cleanField = rtrim($field, '[]');
+        return $this->formFields[$cleanField] ?? null;
     }
     
     /**
@@ -564,24 +772,31 @@ class FormProcessor
      */
     private function getFieldLabel(string $field): string
     {
-        $fieldInfo = $this->getFieldInfo($field);
+        $cleanField = rtrim($field, '[]');
+        $fieldInfo = $this->formFields[$cleanField] ?? null;
+        
         if ($fieldInfo && !empty($fieldInfo['label'])) {
             return $fieldInfo['label'];
         }
         
-        $cleanField = rtrim($field, '[]');
         return ucfirst($cleanField);
     }
 
     /**
-     * Geordnete Formularelemente zurückgeben (verbessert für Duplikate)
+     * Geordnete Formularelemente zurückgeben (ohne Duplikate)
      */
     private function getOrderedFormElements(): array
     {
         $sortedFields = [];
-        $dom = new \DOMDocument();
-        @$dom->loadHTML(mb_convert_encoding($this->formHtml, 'HTML-ENTITIES', 'UTF-8'), 
-            LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        
+        // Verbessertes HTML-Loading
+        $html = $this->formHtml;
+        if (!mb_check_encoding($html, 'UTF-8')) {
+            $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
+        }
+        
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         
         $xpath = new \DOMXPath($dom);
         $elements = $xpath->query('//input|//textarea|//select');
@@ -590,18 +805,14 @@ class FormProcessor
             $name = $element->getAttribute('name');
             if ($name) {
                 $cleanName = rtrim($name, '[]');
-                // Für Radio-Buttons: Nur einmal zur Liste hinzufügen
-                if ($element->getAttribute('type') === 'radio') {
-                    if (!in_array($cleanName, $sortedFields)) {
-                        $sortedFields[] = $cleanName;
-                    }
-                } else {
+                // Nur eindeutige Felder hinzufügen
+                if (!in_array($cleanName, $sortedFields)) {
                     $sortedFields[] = $cleanName;
                 }
             }
         }
         
-        return array_unique($sortedFields);
+        return $sortedFields;
     }
     
     /**
