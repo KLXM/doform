@@ -50,11 +50,8 @@ class FormProcessor
      */
     private function identifyDontSendFields(): void
     {
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        @$dom->loadHTML('<?xml encoding="UTF-8">' . $this->formHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        
-        $xpath = new \DOMXPath($dom);
-        $dontSendElements = $xpath->query('//*[@data-dontsend]');
+        $dom = \Dom\HTMLDocument::createFromString($this->formHtml);
+        $dontSendElements = $dom->querySelectorAll('[data-dontsend]');
         
         foreach ($dontSendElements as $element) {
             $name = $element->getAttribute('name');
@@ -98,26 +95,9 @@ class FormProcessor
     }
 
     /**
-     * XPath-sichere Escapierung
-     */
-    private function escapeForXPath(string $value): string
-    {
-        if (strpos($value, "'") === false) {
-            return "'" . $value . "'";
-        }
-        
-        if (strpos($value, '"') === false) {
-            return '"' . $value . '"';
-        }
-        
-        // Für komplexere Fälle mit beiden Anführungszeichen
-        return "concat('" . str_replace("'", "', \"'\", '", $value) . "')";
-    }
-
-    /**
      * Verbesserte Label-Erkennung für alle Formularelemente
      */
-    private function findElementLabel(\DOMElement $element, array $labels, \DOMXPath $xpath): string
+    private function findElementLabel(\Dom\Element $element, array $labels): string
     {
         $name = $element->getAttribute('name');
         $id = $element->getAttribute('id');
@@ -126,7 +106,7 @@ class FormProcessor
         
         // 1. Prüfung auf data-grouplabel Attribut (für Radio-Gruppen)
         if ($type === 'radio') {
-            $groupLabel = $this->findRadioGroupLabel($name, $xpath);
+            $groupLabel = $this->findRadioGroupLabel($name, $element->ownerDocument);
             if ($groupLabel) {
                 return $groupLabel;
             }
@@ -134,9 +114,9 @@ class FormProcessor
         
         // 2. Fieldset/Legend für Radio-Gruppen (vor for-Attribut prüfen!)
         if ($type === 'radio') {
-            $fieldset = $xpath->query('ancestor::fieldset[1]', $element)->item(0);
+            $fieldset = $element->closest('fieldset');
             if ($fieldset) {
-                $legend = $xpath->query('legend[1]', $fieldset)->item(0);
+                $legend = $fieldset->querySelector('legend');
                 if ($legend) {
                     $legendText = trim($legend->textContent);
                     if (!empty($legendText)) {
@@ -152,7 +132,7 @@ class FormProcessor
         }
         
         // 4. Umschließendes Label (wenn Input im Label verschachtelt ist)
-        $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
+        $parentLabel = $element->closest('label');
         if ($parentLabel) {
             // Prüfen ob das umschließende Label auch ein for-Attribut hat
             $labelFor = $parentLabel->getAttribute('for');
@@ -188,7 +168,7 @@ class FormProcessor
     /**
      * Extrahiert Text aus Label ohne Kind-Elemente (verbessert für Select-Elemente)
      */
-    private function extractLabelText(\DOMElement $label, \DOMElement $targetElement): string
+    private function extractLabelText(\Dom\Element $label, \Dom\Element $targetElement): string
     {
         $text = '';
         
@@ -222,18 +202,16 @@ class FormProcessor
     /**
      * Radio-Gruppe Label über data-grouplabel Attribut finden
      */
-    private function findRadioGroupLabel(string $radioName, \DOMXPath $xpath): ?string
+    private function findRadioGroupLabel(string $radioName, \Dom\HTMLDocument $dom): ?string
     {
         // Prüfe ob bereits ein Gruppen-Label für diese Radio-Gruppe gefunden wurde
         if (isset($this->radioGroups[$radioName])) {
             return $this->radioGroups[$radioName];
         }
         
-        // Escape the radioName to prevent XPath injection
-        $escapedRadioName = $this->escapeForXPath($radioName);
-        
         // Suche nach einem Radio-Button dieser Gruppe mit data-grouplabel Attribut
-        $radioWithGroupLabel = $xpath->query("//input[@type='radio'][@name=$escapedRadioName][@data-grouplabel]")->item(0);
+        $radioWithGroupLabel = $dom->querySelector("input[type='radio'][name='{$radioName}'][data-grouplabel]");
+        
         if ($radioWithGroupLabel) {
             $groupLabel = $radioWithGroupLabel->getAttribute('data-grouplabel');
             $this->radioGroups[$radioName] = $groupLabel;
@@ -244,30 +222,25 @@ class FormProcessor
     }
 
     /**
-     * Formular parsen und Felder extrahieren (verbessert)
+     * Formular parsen und Felder extrahieren (optimiert für PHP 8.4)
      */
     private function parseForm(): void
     {
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        
-        // Verbessertes HTML-Loading mit UTF-8 Handling
         $html = $this->formHtml;
         if (!mb_check_encoding($html, 'UTF-8')) {
             $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
         }
         
-        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        $form = $dom->getElementsByTagName('form')->item(0);
+        $dom = \Dom\HTMLDocument::createFromString($html);
+        $form = $dom->querySelector('form');
         
         if (!$form) {
             return; // Kein Form gefunden
         }
         
-        $xpath = new \DOMXPath($dom);
-
         // Labels mit for-Attribut erfassen
         $labels = [];
-        foreach ($form->getElementsByTagName('label') as $label) {
+        foreach ($form->querySelectorAll('label[for]') as $label) {
             $for = $label->getAttribute('for');
             if ($for) {
                 $labels[$for] = trim($label->textContent);
@@ -275,7 +248,7 @@ class FormProcessor
         }
 
         // Input-Elemente verarbeiten
-        foreach ($form->getElementsByTagName('input') as $input) {
+        foreach ($form->querySelectorAll('input') as $input) {
             $name = $input->getAttribute('name');
             if (empty($name)) continue;
             
@@ -288,7 +261,7 @@ class FormProcessor
                 continue;
             }
             
-            $label = $this->findElementLabel($input, $labels, $xpath);
+            $label = $this->findElementLabel($input, $labels);
             
             $this->formFields[$cleanName] = [
                 'type' => $type, 
@@ -302,7 +275,7 @@ class FormProcessor
         }
 
         // Select-Elemente verarbeiten
-        foreach ($form->getElementsByTagName('select') as $select) {
+        foreach ($form->querySelectorAll('select') as $select) {
             $name = $select->getAttribute('name');
             if (empty($name)) continue;
             
@@ -310,7 +283,7 @@ class FormProcessor
             $multiple = $select->hasAttribute('multiple');
             $required = $select->hasAttribute('required');
             
-            $label = $this->findElementLabel($select, $labels, $xpath);
+            $label = $this->findElementLabel($select, $labels);
             
             $this->formFields[$cleanName] = [
                 'type' => $multiple ? 'multiselect' : 'select',
@@ -325,14 +298,14 @@ class FormProcessor
         }
 
         // Textarea-Elemente verarbeiten
-        foreach ($form->getElementsByTagName('textarea') as $textarea) {
+        foreach ($form->querySelectorAll('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
             if (empty($name)) continue;
             
             $cleanName = rtrim($name, '[]');
             $required = $textarea->hasAttribute('required');
             
-            $label = $this->findElementLabel($textarea, $labels, $xpath);
+            $label = $this->findElementLabel($textarea, $labels);
                 
             $this->formFields[$cleanName] = [
                 'type' => 'textarea',
@@ -347,12 +320,12 @@ class FormProcessor
     }
     
     /**
-     * Select-Optionen extrahieren für bessere Wert-Anzeige
+     * Select-Optionen extrahieren für neue DOM API
      */
-    private function extractSelectOptions(\DOMElement $select): array
+    private function extractSelectOptions(\Dom\Element $select): array
     {
         $options = [];
-        foreach ($select->getElementsByTagName('option') as $option) {
+        foreach ($select->querySelectorAll('option') as $option) {
             $value = $option->getAttribute('value');
             $text = trim($option->textContent);
             $options[$value] = $text;
@@ -361,20 +334,17 @@ class FormProcessor
     }
 
     /**
-     * Formular anzeigen
+     * Formular anzeigen (optimiert für PHP 8.4)
      */
     public function displayForm(): void
     {
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        
-        // Verbessertes HTML-Loading
         $html = $this->formHtml;
         if (!mb_check_encoding($html, 'UTF-8')) {
             $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
         }
         
-        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        $form = $dom->getElementsByTagName('form')->item(0);
+        $dom = \Dom\HTMLDocument::createFromString($html);
+        $form = $dom->querySelector('form');
         
         if (!$form) {
             echo $this->formHtml;
@@ -389,7 +359,7 @@ class FormProcessor
         $form->appendChild($hiddenInput);
 
         // Vorhandene Daten in die Formularfelder einsetzen
-        foreach ($dom->getElementsByTagName('input') as $input) {
+        foreach ($form->querySelectorAll('input') as $input) {
             $name = $input->getAttribute('name');
             $cleanField = rtrim($name, '[]');
             $type = $input->getAttribute('type');
@@ -418,22 +388,22 @@ class FormProcessor
             }
         }
 
-        foreach ($dom->getElementsByTagName('textarea') as $textarea) {
+        foreach ($form->querySelectorAll('textarea') as $textarea) {
             $name = $textarea->getAttribute('name');
             $cleanField = rtrim($name, '[]');
             if (isset($this->formData[$cleanField])) {
-                $textarea->nodeValue = htmlspecialchars($this->formData[$cleanField]);
+                $textarea->textContent = htmlspecialchars($this->formData[$cleanField]);
             }
         }
 
-        foreach ($dom->getElementsByTagName('select') as $select) {
+        foreach ($form->querySelectorAll('select') as $select) {
             $name = $select->getAttribute('name');
             $cleanField = rtrim($name, '[]');
             if (isset($this->formData[$cleanField])) {
                 $selectedValues = is_array($this->formData[$cleanField]) ? 
                     $this->formData[$cleanField] : [$this->formData[$cleanField]];
                 
-                foreach ($select->getElementsByTagName('option') as $option) {
+                foreach ($select->querySelectorAll('option') as $option) {
                     if (in_array($option->getAttribute('value'), $selectedValues)) {
                         $option->setAttribute('selected', 'selected');
                     }
@@ -807,23 +777,39 @@ class FormProcessor
     }
 
     /**
-     * Geordnete Formularelemente zurückgeben (ohne Duplikate)
+     * Geordnete Formularelemente zurückgeben (optimiert für PHP 8.4)
      */
     private function getOrderedFormElements(): array
     {
         $sortedFields = [];
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        
-        // Verbessertes HTML-Loading
         $html = $this->formHtml;
+        
         if (!mb_check_encoding($html, 'UTF-8')) {
             $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
         }
         
-        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $dom = \Dom\HTMLDocument::createFromString($html);
+        $elements = $dom->querySelectorAll('input, textarea, select');
         
-        $xpath = new \DOMXPath($dom);
-        $elements = $xpath->query('//input|//textarea|//select');
+        foreach ($elements as $element) {
+            $name = $element->getAttribute('name');
+            if ($name) {
+                $cleanName = rtrim($name, '[]');
+                // Nur eindeutige Felder hinzufügen
+    /**
+     * Geordnete Formularelemente zurückgeben (optimiert für PHP 8.4)
+     */
+    private function getOrderedFormElements(): array
+    {
+        $sortedFields = [];
+        $html = $this->formHtml;
+        
+        if (!mb_check_encoding($html, 'UTF-8')) {
+            $html = mb_convert_encoding($html, 'UTF-8', mb_detect_encoding($html));
+        }
+        
+        $dom = \Dom\HTMLDocument::createFromString($html);
+        $elements = $dom->querySelectorAll('input, textarea, select');
         
         foreach ($elements as $element) {
             $name = $element->getAttribute('name');
