@@ -132,22 +132,7 @@ class FormProcessor
             }
         }
         
-        // 2. Label über for-Attribut (klassischer Fall)
-        if ($id && isset($labels[$id])) {
-            return $labels[$id];
-        }
-        
-        // 3. Umschließendes Label (wenn Input im Label verschachtelt ist)
-        $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
-        if ($parentLabel) {
-            // Extrahiere nur den direkten Text-Inhalt des Labels, nicht der Kind-Elemente
-            $labelText = $this->extractLabelText($parentLabel, $element);
-            if (!empty($labelText)) {
-                return $labelText;
-            }
-        }
-        
-        // 4. Fieldset/Legend für Radio-Gruppen
+        // 2. Fieldset/Legend für Radio-Gruppen (vor for-Attribut prüfen!)
         if ($type === 'radio') {
             $fieldset = $xpath->query('ancestor::fieldset[1]', $element)->item(0);
             if ($fieldset) {
@@ -158,6 +143,30 @@ class FormProcessor
                         return $legendText;
                     }
                 }
+            }
+        }
+        
+        // 3. Label über for-Attribut (klassischer Fall)
+        if ($id && isset($labels[$id])) {
+            return $labels[$id];
+        }
+        
+        // 4. Umschließendes Label (wenn Input im Label verschachtelt ist)
+        $parentLabel = $xpath->query('ancestor::label[1]', $element)->item(0);
+        if ($parentLabel) {
+            // Prüfen ob das umschließende Label auch ein for-Attribut hat
+            $labelFor = $parentLabel->getAttribute('for');
+            if ($labelFor && $labelFor === $id) {
+                // Label hat for-Attribut für dieses Element - verwende for-Label
+                if (isset($labels[$id])) {
+                    return $labels[$id];
+                }
+            }
+            
+            // Extrahiere nur den direkten Text-Inhalt des Labels, nicht der Kind-Elemente
+            $labelText = $this->extractLabelText($parentLabel, $element);
+            if (!empty($labelText)) {
+                return $labelText;
             }
         }
         
@@ -177,7 +186,7 @@ class FormProcessor
     }
     
     /**
-     * Extrahiert Text aus Label ohne Kind-Elemente
+     * Extrahiert Text aus Label ohne Kind-Elemente (verbessert für Select-Elemente)
      */
     private function extractLabelText(\DOMElement $label, \DOMElement $targetElement): string
     {
@@ -187,8 +196,23 @@ class FormProcessor
             if ($child->nodeType === XML_TEXT_NODE) {
                 $text .= $child->textContent;
             } elseif ($child->nodeType === XML_ELEMENT_NODE && $child !== $targetElement) {
-                // Füge Text von anderen Elementen hinzu (außer dem Ziel-Input)
-                $text .= $child->textContent;
+                // Für Elemente die nicht das Ziel-Element sind
+                if ($child->nodeName === 'span' || $child->nodeName === 'strong' || 
+                    $child->nodeName === 'em' || $child->nodeName === 'b' || 
+                    $child->nodeName === 'i') {
+                    // Text-Elemente hinzufügen
+                    $text .= $child->textContent;
+                } elseif ($child->nodeName === 'select') {
+                    // Select-Elemente überspringen (keine Option-Texte hinzufügen)
+                    continue;
+                } else {
+                    // Andere Elemente: Nur direkten Text-Inhalt, keine verschachtelten Elemente
+                    foreach ($child->childNodes as $grandChild) {
+                        if ($grandChild->nodeType === XML_TEXT_NODE) {
+                            $text .= $grandChild->textContent;
+                        }
+                    }
+                }
             }
         }
         
