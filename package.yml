@@ -5,4 +5,4 @@ supportpage: https://github.com/FriendsOfREDAXO/addon_key
 requires:
     redaxo: '^5.17.1'
     php:
-        version: '>=8.1, <9'
+        version: '>=8.4, <9'
